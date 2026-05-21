@@ -22,6 +22,7 @@ public:
   ThinkNodeM6Board() : NRF52Board("THINKNODE_M6_OTA") {}
   void begin();
   uint16_t getBattMilliVolts() override;
+  void bootComplete();
 
 #if defined(P_LORA_TX_LED)
   void onBeforeTransmit() override {
@@ -37,13 +38,19 @@ public:
   }
 
   void powerOff() override {
-
-    // turn off all leds, sd_power_system_off will not do this for us
+    // Turn off LEDs so the device visually confirms a clean shutdown.
+    digitalWrite(PIN_LED_RED,  LOW);
+    digitalWrite(PIN_LED_BLUE, LOW);
     #ifdef P_LORA_TX_LED
     digitalWrite(P_LORA_TX_LED, LOW);
     #endif
 
-    // power off board
+    // Break the soft-power latch — on battery, this physically cuts MCU power.
+    digitalWrite(PIN_PWR_EN, LOW);
+
+    // Belt-and-braces: if USB is providing power, the latch drop won't kill the chip.
     sd_power_system_off();
+
+    while (1) {}  // unreachable
   }
 };

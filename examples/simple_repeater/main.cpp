@@ -28,6 +28,19 @@ static unsigned long userBtnDownAt = 0;
 #define USER_BTN_HOLD_OFF_MILLIS 1500
 #endif
 
+#if defined(PIN_USER_BTN) && defined(THINKNODE_M6)
+static unsigned long m6BtnDownAt = 0;
+static bool m6BtnFeedbackArmed = false;
+// Visual thresholds during a long-press:
+//   <  3000 ms  : LEDs off (just sensing the press)
+//   3000-4000   : both LEDs blink in unison @ ~5 Hz
+//   4000-5000   : both LEDs solid on
+//   >= 5000 ms  : powerOff()
+#define M6_HOLD_BLINK_MS       3000
+#define M6_HOLD_SOLID_MS       4000
+#define M6_HOLD_POWEROFF_MS    5000
+#endif
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -146,6 +159,39 @@ void loop() {
     }
   } else {
     userBtnDownAt = 0;
+  }
+#endif
+
+#if defined(PIN_USER_BTN) && defined(THINKNODE_M6)
+  // Hold Function Button to power off the ThinkNode M6.
+  {
+    int btnState = digitalRead(PIN_USER_BTN);
+    if (btnState == LOW) {
+      if (m6BtnDownAt == 0) {
+        m6BtnDownAt = millis();
+        m6BtnFeedbackArmed = true;
+      }
+      unsigned long held = millis() - m6BtnDownAt;
+
+      if (held >= M6_HOLD_POWEROFF_MS) {
+        Serial.println("Powering off...");
+        board.powerOff();  // does not return
+      } else if (held >= M6_HOLD_SOLID_MS) {
+        digitalWrite(PIN_LED_RED,  HIGH);
+        digitalWrite(PIN_LED_BLUE, HIGH);
+      } else if (held >= M6_HOLD_BLINK_MS) {
+        bool on = ((held / 100) % 2) == 0;
+        digitalWrite(PIN_LED_RED,  on ? HIGH : LOW);
+        digitalWrite(PIN_LED_BLUE, on ? HIGH : LOW);
+      }
+    } else {
+      if (m6BtnFeedbackArmed && m6BtnDownAt != 0) {
+        digitalWrite(PIN_LED_RED,  LOW);
+        digitalWrite(PIN_LED_BLUE, LOW);
+      }
+      m6BtnDownAt = 0;
+      m6BtnFeedbackArmed = false;
+    }
   }
 #endif
 
