@@ -5,33 +5,15 @@
 
 // Capture NRF_POWER->RESETREAS before SystemInit() runs the Nordic errata-136
 // workaround that clears the RESETPIN bit. Priority 101 places this before
-// SystemInit (102) and all C++ static constructors. Exposed via the globals
-// below so ThinkNodeM6Board::begin() can decide whether to boot or re-sleep.
-//
-// We also leverage GPREGRET2 (an 8-bit retained register) to detect full
-// power loss: the register persists through SYSTEMOFF but is cleared when
-// the chip loses power completely. By stamping a magic value on every boot,
-// the next boot can tell "we cleanly went to SYSTEMOFF" (magic still there)
-// from "battery died and just came back" (magic cleared). The latter case
-// boots automatically — important for unattended solar-powered deployments.
-//
-// NOTE: GPREGRET2 is also written by NRF52Board::enterSystemOff() when
-// NRF52_POWER_MANAGEMENT is defined. That build flag is NOT set for any M6
-// env today, so there is no conflict. If it's ever enabled for the M6, the
-// magic value here will collide with the shutdown-reason byte stored there.
-#define M6_GPREGRET2_MAGIC      0xA5
-volatile uint32_t g_m6_reset_reason  = 0;
-volatile bool     g_m6_was_powered   = false;
+// SystemInit (102) and all C++ static constructors. Exposed via the global
+// g_m6_reset_reason so ThinkNodeM6Board::begin() can decide whether to honor
+// the intent-check (button hold) or bypass it (reset-pin reboot).
+volatile uint32_t g_m6_reset_reason = 0;
 
 extern "C" __attribute__((constructor(101))) void m6_capture_resetreas(void) {
   g_m6_reset_reason = NRF_POWER->RESETREAS;
   // Clear sticky bits so the next boot sees a fresh state.
   NRF_POWER->RESETREAS = 0xFFFFFFFFul;
-
-  // GPREGRET2 magic value: present = firmware ran in this power session
-  // (we cleanly went to SYSTEMOFF and came back); absent = power was lost.
-  g_m6_was_powered = (NRF_POWER->GPREGRET2 == M6_GPREGRET2_MAGIC);
-  NRF_POWER->GPREGRET2 = M6_GPREGRET2_MAGIC;  // stamp it for next boot
 }
 
 const uint32_t g_ADigitalPinMap[] = {

@@ -30,22 +30,35 @@ static unsigned long userBtnDownAt = 0;
 
 #if defined(PIN_USER_BTN) && defined(THINKNODE_M6)
 static unsigned long m6BtnDownAt = 0;
-static bool m6BtnFeedbackArmed = false;
-// Visual thresholds during a long-press:
-//   <  3000 ms  : LEDs off (just sensing the press)
-//   3000-4000   : both LEDs blink in unison @ ~5 Hz
-//   4000-5000   : both LEDs solid on
-//   >= 5000 ms  : powerOff()
-#define M6_HOLD_BLINK_MS       3000
-#define M6_HOLD_SOLID_MS       4000
-#define M6_HOLD_POWEROFF_MS    5000
+// Long-press shutdown timeline (red LED only — no blue until the final flash):
+//   0-1000 ms     : LEDs off
+//   1000-1200 ms  : red flash @ 50% brightness
+//   1200-2000 ms  : red off
+//   2000-2200 ms  : red flash @ 50% brightness
+//   2200-3000 ms  : red off
+//   >= 3000 ms    : commitment — board.powerOff() shows red full bright for
+//                   1 s, then both LEDs flash 50 ms, then sleeps at the 4 s
+//                   mark regardless of whether the button is still held.
+#define M6_OFF_FLASH1_START_MS  1000
+#define M6_OFF_FLASH1_END_MS    1200
+#define M6_OFF_FLASH2_START_MS  2000
+#define M6_OFF_FLASH2_END_MS    2200
+#define M6_OFF_COMMIT_MS        3000
+#define M6_OFF_FLASH_BRIGHT     128   // ~50% of 255
 #endif
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
 
+#ifdef THINKNODE_M6
+  // The M6's board.begin() does a 0.5-second hold-to-power-on intent check.
+  // Run it before the pre-setup delay so the user's 0.5 s hold timer starts
+  // immediately on wake, not after a 1-second pre-delay.
   board.begin();
+#else
+  delay(1000);
+  board.begin();
+#endif
 
 #if defined(MESH_DEBUG) && defined(NRF52_PLATFORM)
   // give some extra time for serial to settle so
@@ -169,28 +182,30 @@ void loop() {
     if (btnState == LOW) {
       if (m6BtnDownAt == 0) {
         m6BtnDownAt = millis();
-        m6BtnFeedbackArmed = true;
       }
       unsigned long held = millis() - m6BtnDownAt;
 
-      if (held >= M6_HOLD_POWEROFF_MS) {
+      if (held >= M6_OFF_COMMIT_MS) {
+        // Commitment: powerOff() snaps red to full bright for 1 s, then sleeps.
         Serial.println("Powering off...");
         board.powerOff();  // does not return
-      } else if (held >= M6_HOLD_SOLID_MS) {
-        digitalWrite(PIN_LED_RED,  HIGH);
-        digitalWrite(PIN_LED_BLUE, HIGH);
-      } else if (held >= M6_HOLD_BLINK_MS) {
-        bool on = ((held / 100) % 2) == 0;
-        digitalWrite(PIN_LED_RED,  on ? HIGH : LOW);
-        digitalWrite(PIN_LED_BLUE, on ? HIGH : LOW);
+      } else if ((held >= M6_OFF_FLASH1_START_MS && held < M6_OFF_FLASH1_END_MS) ||
+                 (held >= M6_OFF_FLASH2_START_MS && held < M6_OFF_FLASH2_END_MS)) {
+        // Brief 50% red flash at the 2 s and 3 s marks.
+        analogWrite(PIN_LED_RED,  M6_OFF_FLASH_BRIGHT);
+        analogWrite(PIN_LED_BLUE, 0);
+      } else {
+        // All other pre-commit moments: LEDs off.
+        analogWrite(PIN_LED_RED,  0);
+        analogWrite(PIN_LED_BLUE, 0);
       }
     } else {
-      if (m6BtnFeedbackArmed && m6BtnDownAt != 0) {
-        digitalWrite(PIN_LED_RED,  LOW);
-        digitalWrite(PIN_LED_BLUE, LOW);
+      // Released before commitment — cancel and clear LEDs.
+      if (m6BtnDownAt != 0) {
+        analogWrite(PIN_LED_RED,  0);
+        analogWrite(PIN_LED_BLUE, 0);
       }
       m6BtnDownAt = 0;
-      m6BtnFeedbackArmed = false;
     }
   }
 #endif
