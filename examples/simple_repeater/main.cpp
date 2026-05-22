@@ -28,7 +28,6 @@ static unsigned long userBtnDownAt = 0;
 #define USER_BTN_HOLD_OFF_MILLIS 1500
 #endif
 
-
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -151,9 +150,7 @@ void loop() {
 #endif
 
 #ifdef THINKNODE_M6
-  if (board.checkButton()) {
-    the_mesh.sendSelfAdvertisement(16000, false);
-  }
+  board.pollButton();
 #endif
 
   the_mesh.loop();

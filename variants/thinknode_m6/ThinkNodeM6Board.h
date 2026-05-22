@@ -30,11 +30,9 @@ public:
   // started in begin() and flashes the blue LED briefly.
   void bootComplete();
 
-  // Polls the function button. Drives all LED feedback during a hold,
-  // calls powerOff() internally on a long press, and runs the Morse "A"
-  // ack blink on a quick tap.
-  // Returns true on a tap — caller should broadcast a self-advertisement.
-  bool checkButton();
+  // Polls the function button. Drives LED feedback during a hold and
+  // calls powerOff() internally on a long press (>= 2 s).
+  void pollButton();
 
 #if defined(P_LORA_TX_LED)
   void onBeforeTransmit() override {
