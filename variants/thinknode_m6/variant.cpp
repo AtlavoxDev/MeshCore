@@ -3,35 +3,27 @@
 #include "wiring_digital.h"
 #include "nrf.h"
 
-// Capture NRF_POWER->RESETREAS before SystemInit() runs the Nordic errata-136
-// workaround that clears the RESETPIN bit. Priority 101 places this before
-// SystemInit (102) and all C++ static constructors. Exposed via the globals
-// below so ThinkNodeM6Board::begin() can decide whether to boot or re-sleep.
+// Globals captured early — before SystemInit()'s errata-136 workaround
+// clears the RESETPIN bit, and before any C++ static constructors. Priority
+// 101 runs before SystemInit (102).
 //
-// We also leverage GPREGRET2 (an 8-bit retained register) to detect full
-// power loss: the register persists through SYSTEMOFF but is cleared when
-// the chip loses power completely. By stamping a magic value on every boot,
-// the next boot can tell "we cleanly went to SYSTEMOFF" (magic still there)
-// from "battery died and just came back" (magic cleared). The latter case
-// boots automatically — important for unattended solar-powered deployments.
+// g_m6_reset_reason: snapshot of NRF_POWER->RESETREAS.
+// g_m6_was_shutdown: true if GPREGRET2 holds the "user-intent" magic byte.
 //
-// NOTE: GPREGRET2 is also written by NRF52Board::enterSystemOff() when
-// NRF52_POWER_MANAGEMENT is defined. That build flag is NOT set for any M6
-// env today, so there is no conflict. If it's ever enabled for the M6, the
-// magic value here will collide with the shutdown-reason byte stored there.
-#define M6_GPREGRET2_MAGIC      0xA5
+// GPREGRET2 is used as a user-intent flag: powerOff() writes 0xA5 right
+// before SYSTEMOFF, board.begin() clears it on a successful boot. It
+// persists across SYSTEMOFF but is wiped by a true power-on reset.
+//
+// NOTE: GPREGRET2 is also written by NRF52Board::enterSystemOff() under the
+// NRF52_POWER_MANAGEMENT build flag. That flag is not set for any M6 env;
+// if it ever is, the byte stored here will collide.
 volatile uint32_t g_m6_reset_reason  = 0;
-volatile bool     g_m6_was_powered   = false;
+volatile bool     g_m6_was_shutdown  = false;
 
 extern "C" __attribute__((constructor(101))) void m6_capture_resetreas(void) {
   g_m6_reset_reason = NRF_POWER->RESETREAS;
-  // Clear sticky bits so the next boot sees a fresh state.
-  NRF_POWER->RESETREAS = 0xFFFFFFFFul;
-
-  // GPREGRET2 magic value: present = firmware ran in this power session
-  // (we cleanly went to SYSTEMOFF and came back); absent = power was lost.
-  g_m6_was_powered = (NRF_POWER->GPREGRET2 == M6_GPREGRET2_MAGIC);
-  NRF_POWER->GPREGRET2 = M6_GPREGRET2_MAGIC;  // stamp it for next boot
+  NRF_POWER->RESETREAS = 0xFFFFFFFFul;  // clear sticky bits
+  g_m6_was_shutdown = (NRF_POWER->GPREGRET2 == 0xA5);
 }
 
 const uint32_t g_ADigitalPinMap[] = {

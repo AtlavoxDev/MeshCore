@@ -23,9 +23,8 @@ public:
   void begin();
   uint16_t getBattMilliVolts() override;
 
-  // Called at the very end of setup() to mark "boot complete": stops the
-  // disk-activity-style blue flicker started in begin(), turns the red LED
-  // off, and flashes the blue LED for 100 ms.
+  // Called at the end of setup(). Stops the disk-activity blue flicker
+  // started in begin() and flashes the blue LED briefly.
   void bootComplete();
 
 #if defined(P_LORA_TX_LED)
