@@ -125,7 +125,7 @@ void ThinkNodeM6Board::begin() {
     enterDeepSleep();
   }
 
-  // Intent confirmed — both LEDs full bright for 1 second.
+  // Boot indicator: both LEDs full bright for 1 second.
   digitalWrite(PIN_LED_RED,  HIGH);
   digitalWrite(PIN_LED_BLUE, HIGH);
   delay(1000);

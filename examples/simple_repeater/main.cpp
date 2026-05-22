@@ -31,29 +31,36 @@ static unsigned long userBtnDownAt = 0;
 #if defined(PIN_USER_BTN) && defined(THINKNODE_M6)
 static unsigned long m6BtnDownAt = 0;
 // Long-press shutdown timeline (red LED only — no blue until the final flash):
-//   0-1000 ms     : LEDs off
-//   1000-1200 ms  : red flash @ 50% brightness
+//   0-200 ms      : red flash @ 50% — immediate ack of the press
+//   200-1000 ms   : red off
+//   1000-1200 ms  : red flash @ 50%
 //   1200-2000 ms  : red off
-//   2000-2200 ms  : red flash @ 50% brightness
-//   2200-3000 ms  : red off
-//   >= 3000 ms    : commitment — board.powerOff() shows red full bright for
-//                   1 s, then both LEDs flash 50 ms, then sleeps at the 4 s
-//                   mark regardless of whether the button is still held.
-#define M6_OFF_FLASH1_START_MS  1000
-#define M6_OFF_FLASH1_END_MS    1200
-#define M6_OFF_FLASH2_START_MS  2000
-#define M6_OFF_FLASH2_END_MS    2200
-#define M6_OFF_COMMIT_MS        3000
+//   >= 2000 ms    : commitment — board.powerOff() shows red full bright for
+//                   1 s (the third "blink"), then both LEDs flash 50 ms,
+//                   then sleeps at the 3 s mark regardless of button state.
+#define M6_OFF_FLASH1_START_MS  0
+#define M6_OFF_FLASH1_END_MS    200
+#define M6_OFF_FLASH2_START_MS  1000
+#define M6_OFF_FLASH2_END_MS    1200
+#define M6_OFF_COMMIT_MS        2000
 #define M6_OFF_FLASH_BRIGHT     128   // ~50% of 255
+
+// Tap (quick press+release) sends an advertisement and blinks Morse "A" on
+// the blue LED to acknowledge.
+#define M6_TAP_MIN_MS           30    // debounce floor
+#define M6_TAP_MAX_MS           500   // anything longer is a hold attempt
+#define M6_MORSE_DOT_MS         200
+#define M6_MORSE_GAP_MS         200
+#define M6_MORSE_DASH_MS        600
 #endif
 
 void setup() {
   Serial.begin(115200);
 
 #ifdef THINKNODE_M6
-  // The M6's board.begin() does a 0.5-second hold-to-power-on intent check.
-  // Run it before the pre-setup delay so the user's 0.5 s hold timer starts
-  // immediately on wake, not after a 1-second pre-delay.
+  // The M6's board.begin() drives the boot LED sequence. Run it before the
+  // pre-setup delay so the LEDs come on as soon as the chip wakes, rather
+  // than after a 1-second silent gap.
   board.begin();
 #else
   delay(1000);
@@ -191,19 +198,33 @@ void loop() {
         board.powerOff();  // does not return
       } else if ((held >= M6_OFF_FLASH1_START_MS && held < M6_OFF_FLASH1_END_MS) ||
                  (held >= M6_OFF_FLASH2_START_MS && held < M6_OFF_FLASH2_END_MS)) {
-        // Brief 50% red flash at the 2 s and 3 s marks.
-        analogWrite(PIN_LED_RED,  M6_OFF_FLASH_BRIGHT);
-        analogWrite(PIN_LED_BLUE, 0);
+        // Brief 50% red flash at the 0 s (immediate ack) and 1 s marks.
+        analogWrite(PIN_LED_RED,    M6_OFF_FLASH_BRIGHT);
+        digitalWrite(PIN_LED_BLUE,  LOW);
       } else {
         // All other pre-commit moments: LEDs off.
-        analogWrite(PIN_LED_RED,  0);
-        analogWrite(PIN_LED_BLUE, 0);
+        analogWrite(PIN_LED_RED,    0);
+        digitalWrite(PIN_LED_BLUE,  LOW);
       }
     } else {
-      // Released before commitment — cancel and clear LEDs.
+      // Button released. Could be a cancel (started off-sequence but let go)
+      // or a tap (quick press+release to send an advert).
       if (m6BtnDownAt != 0) {
-        analogWrite(PIN_LED_RED,  0);
-        analogWrite(PIN_LED_BLUE, 0);
+        unsigned long held = millis() - m6BtnDownAt;
+        analogWrite(PIN_LED_RED,    0);
+        digitalWrite(PIN_LED_BLUE,  LOW);
+
+        if (held >= M6_TAP_MIN_MS && held < M6_TAP_MAX_MS) {
+          // Tap — broadcast an advert and blink Morse "A" (dot-dash) on
+          // the blue LED. digitalWrite (not analogWrite) so the blue pin
+          // stays in pure GPIO mode and the LoRa TX LED keeps working.
+          Serial.println("Tap -> sending advert");
+          the_mesh.sendSelfAdvertisement(16000, false);
+          digitalWrite(PIN_LED_BLUE, HIGH); delay(M6_MORSE_DOT_MS);
+          digitalWrite(PIN_LED_BLUE, LOW);  delay(M6_MORSE_GAP_MS);
+          digitalWrite(PIN_LED_BLUE, HIGH); delay(M6_MORSE_DASH_MS);
+          digitalWrite(PIN_LED_BLUE, LOW);
+        }
       }
       m6BtnDownAt = 0;
     }
