@@ -18,10 +18,21 @@ protected:
   void initiateShutdown(uint8_t reason) override;
 #endif
 
+private:
+  unsigned long _btn_down_at = 0;  // function-button press timestamp (0 = not pressed)
+
 public:
   ThinkNodeM6Board() : NRF52Board("THINKNODE_M6_OTA") {}
   void begin();
   uint16_t getBattMilliVolts() override;
+
+  // Called at the end of setup(). Stops the disk-activity blue flicker
+  // started in begin() and flashes the blue LED briefly.
+  void bootComplete();
+
+  // Polls the function button. Drives LED feedback during a hold and
+  // calls powerOff() internally on a long press (>= 2 s).
+  void pollButton();
 
 #if defined(P_LORA_TX_LED)
   void onBeforeTransmit() override {
@@ -36,14 +47,5 @@ public:
     return "Elecrow ThinkNode M6";
   }
 
-  void powerOff() override {
-
-    // turn off all leds, sd_power_system_off will not do this for us
-    #ifdef P_LORA_TX_LED
-    digitalWrite(P_LORA_TX_LED, LOW);
-    #endif
-
-    // power off board
-    sd_power_system_off();
-  }
+  void powerOff() override;
 };

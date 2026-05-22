@@ -2,6 +2,7 @@
 #include "CommonCLI.h"
 #include "TxtDataHelpers.h"
 #include "AdvertDataHelpers.h"
+#include "TxtDataHelpers.h"
 #include <RTClib.h>
 
 #ifndef BRIDGE_MAX_BAUD
@@ -285,7 +286,8 @@ void CommonCLI::handleCommand(uint32_t sender_timestamp, char* command, char* re
       // change admin password
       StrHelper::strncpy(_prefs->password, &command[9], sizeof(_prefs->password));
       savePrefs();
-      sprintf(reply, "password now: %s", _prefs->password);   // echo back just to let admin know for sure!!
+      sprintf(reply, "password now: ");
+      StrHelper::strncpy(&reply[14], _prefs->password, 160-15);   // echo back just to let admin know for sure!!
     } else if (memcmp(command, "clear stats", 11) == 0) {
       _callbacks->clearStats();
       strcpy(reply, "(OK - stats reset)");
@@ -580,21 +582,21 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     strcpy(reply, "OK");
   } else if (memcmp(config, "rxdelay ", 8) == 0) {
     float db = atof(&config[8]);
-    if (db >= 0) {
+    if (db >= 0 && db <= 20.0f) {
       _prefs->rx_delay_base = db;
       savePrefs();
       strcpy(reply, "OK");
     } else {
-      strcpy(reply, "Error, cannot be negative");
+      strcpy(reply, "Error, must be 0-20");
     }
   } else if (memcmp(config, "txdelay ", 8) == 0) {
     float f = atof(&config[8]);
-    if (f >= 0) {
+    if (f >= 0 && f <= 2.0f) {
       _prefs->tx_delay_factor = f;
       savePrefs();
       strcpy(reply, "OK");
     } else {
-      strcpy(reply, "Error, cannot be negative");
+      strcpy(reply, "Error, must be 0-2");
     }
   } else if (memcmp(config, "flood.max ", 10) == 0) {
     uint8_t m = atoi(&config[10]);
@@ -607,12 +609,12 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
     }
   } else if (memcmp(config, "direct.txdelay ", 15) == 0) {
     float f = atof(&config[15]);
-    if (f >= 0) {
+    if (f >= 0 && f <= 2.0f) {
       _prefs->direct_tx_delay_factor = f;
       savePrefs();
       strcpy(reply, "OK");
     } else {
-      strcpy(reply, "Error, cannot be negative");
+      strcpy(reply, "Error, must be 0-2");
     }
   } else if (memcmp(config, "owner.info ", 11) == 0) {
     config += 11;
@@ -726,7 +728,8 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       strcpy(reply, "Error: unsupported by this board");
     };
   } else {
-    sprintf(reply, "unknown config: %s", config);
+    strcpy(reply, "unknown config: ");
+    StrHelper::strncpy(&reply[16], config, 160-17);
   }
 }
 
@@ -784,10 +787,11 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
   } else if (memcmp(config, "direct.txdelay", 14) == 0) {
     sprintf(reply, "> %s", StrHelper::ftoa(_prefs->direct_tx_delay_factor));
   } else if (memcmp(config, "owner.info", 10) == 0) {
+    auto start = reply;
     *reply++ = '>';
     *reply++ = ' ';
     const char* sp = _prefs->owner_info;
-    while (*sp) {
+    while (*sp && reply - start < 159) {
       *reply++ = (*sp == '\n') ? '|' : *sp;    // translate newline back to orig '|'
       sp++;
     }
