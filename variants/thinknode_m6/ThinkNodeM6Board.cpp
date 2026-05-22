@@ -5,22 +5,15 @@
 
 #include <Wire.h>
 
-// Function-button timing constants (used by checkButton()).
-//   Long-press shutdown: brief red blink at 0 s and 1 s during the hold,
-//   then board.powerOff() runs the final cue when held past 2 s.
+// Function-button timing for hold-to-power-off.
+//   Brief red blink at 0 s and 1 s during the hold, then board.powerOff()
+//   runs the final cue when held past 2 s.
 #define M6_OFF_FLASH1_START_MS  0
 #define M6_OFF_FLASH1_END_MS    200
 #define M6_OFF_FLASH2_START_MS  1000
 #define M6_OFF_FLASH2_END_MS    1200
 #define M6_OFF_COMMIT_MS        2000
 #define M6_OFF_FLASH_BRIGHT     128   // ~50% of 255
-
-// Quick tap (press+release) sends an advert; blue blinks Morse "A".
-#define M6_TAP_MIN_MS           30    // debounce floor
-#define M6_TAP_MAX_MS           500   // anything longer is a hold attempt
-#define M6_MORSE_DOT_MS         200
-#define M6_MORSE_GAP_MS         200
-#define M6_MORSE_DASH_MS        600
 
 // Boot-phase blue LED flicker. TIMER2 fires at pseudo-random 10-100 ms
 // intervals; the ISR toggles the blue LED. Runs in the background through
@@ -206,7 +199,7 @@ void ThinkNodeM6Board::bootComplete() {
   digitalWrite(PIN_LED_BLUE, LOW);
 }
 
-bool ThinkNodeM6Board::checkButton() {
+void ThinkNodeM6Board::pollButton() {
   int btnState = digitalRead(PIN_USER_BTN);
   if (btnState == LOW) {
     if (_btn_down_at == 0) {
@@ -225,30 +218,14 @@ bool ThinkNodeM6Board::checkButton() {
       analogWrite(PIN_LED_RED,    0);
       digitalWrite(PIN_LED_BLUE,  LOW);
     }
-    return false;
-  }
-
-  // Button released. Quick press+release = tap (send advert). Longer
-  // holds that don't reach the commit threshold are silent cancels.
-  bool was_tap = false;
-  if (_btn_down_at != 0) {
-    unsigned long held = millis() - _btn_down_at;
-    analogWrite(PIN_LED_RED,    0);
-    digitalWrite(PIN_LED_BLUE,  LOW);
-
-    if (held >= M6_TAP_MIN_MS && held < M6_TAP_MAX_MS) {
-      // Tap → run Morse "A" ack on blue. digitalWrite keeps blue in pure
-      // GPIO mode so the LoRa TX LED indicator still works afterwards.
-      Serial.println("Tap -> sending advert");
-      digitalWrite(PIN_LED_BLUE, HIGH); delay(M6_MORSE_DOT_MS);
-      digitalWrite(PIN_LED_BLUE, LOW);  delay(M6_MORSE_GAP_MS);
-      digitalWrite(PIN_LED_BLUE, HIGH); delay(M6_MORSE_DASH_MS);
-      digitalWrite(PIN_LED_BLUE, LOW);
-      was_tap = true;
+  } else {
+    // Button released before commit — clear LEDs and reset state.
+    if (_btn_down_at != 0) {
+      analogWrite(PIN_LED_RED,    0);
+      digitalWrite(PIN_LED_BLUE,  LOW);
     }
+    _btn_down_at = 0;
   }
-  _btn_down_at = 0;
-  return was_tap;
 }
 
 #endif
