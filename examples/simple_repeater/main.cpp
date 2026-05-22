@@ -28,36 +28,12 @@ static unsigned long userBtnDownAt = 0;
 #define USER_BTN_HOLD_OFF_MILLIS 1500
 #endif
 
-#if defined(PIN_USER_BTN) && defined(THINKNODE_M6)
-static unsigned long m6BtnDownAt = 0;
-// Long-press shutdown: red LED flashes briefly at 0 s and 1 s during the
-// hold, then board.powerOff() runs the final shutdown cue at 2 s.
-#define M6_OFF_FLASH1_START_MS  0
-#define M6_OFF_FLASH1_END_MS    200
-#define M6_OFF_FLASH2_START_MS  1000
-#define M6_OFF_FLASH2_END_MS    1200
-#define M6_OFF_COMMIT_MS        2000
-#define M6_OFF_FLASH_BRIGHT     128   // ~50% of 255
-
-// Quick tap (press+release) sends an advert; blue LED blinks Morse "A".
-#define M6_TAP_MIN_MS           30    // debounce floor
-#define M6_TAP_MAX_MS           500   // anything longer is a hold attempt
-#define M6_MORSE_DOT_MS         200
-#define M6_MORSE_GAP_MS         200
-#define M6_MORSE_DASH_MS        600
-#endif
 
 void setup() {
   Serial.begin(115200);
-
-#ifdef THINKNODE_M6
-  // M6's board.begin() drives the boot LED sequence; run it before any
-  // pre-setup delays so the LEDs come on immediately at wake.
-  board.begin();
-#else
   delay(1000);
+
   board.begin();
-#endif
 
 #if defined(MESH_DEBUG) && defined(NRF52_PLATFORM)
   // give some extra time for serial to settle so
@@ -174,48 +150,9 @@ void loop() {
   }
 #endif
 
-#if defined(PIN_USER_BTN) && defined(THINKNODE_M6)
-  // Hold Function Button to power off the ThinkNode M6.
-  {
-    int btnState = digitalRead(PIN_USER_BTN);
-    if (btnState == LOW) {
-      if (m6BtnDownAt == 0) {
-        m6BtnDownAt = millis();
-      }
-      unsigned long held = millis() - m6BtnDownAt;
-
-      if (held >= M6_OFF_COMMIT_MS) {
-        Serial.println("Powering off...");
-        board.powerOff();  // does not return
-      } else if ((held >= M6_OFF_FLASH1_START_MS && held < M6_OFF_FLASH1_END_MS) ||
-                 (held >= M6_OFF_FLASH2_START_MS && held < M6_OFF_FLASH2_END_MS)) {
-        analogWrite(PIN_LED_RED,    M6_OFF_FLASH_BRIGHT);
-        digitalWrite(PIN_LED_BLUE,  LOW);
-      } else {
-        analogWrite(PIN_LED_RED,    0);
-        digitalWrite(PIN_LED_BLUE,  LOW);
-      }
-    } else {
-      // Button released. Quick press+release = tap (send advert). Longer
-      // holds that don't reach the commit threshold are silent cancels.
-      if (m6BtnDownAt != 0) {
-        unsigned long held = millis() - m6BtnDownAt;
-        analogWrite(PIN_LED_RED,    0);
-        digitalWrite(PIN_LED_BLUE,  LOW);
-
-        if (held >= M6_TAP_MIN_MS && held < M6_TAP_MAX_MS) {
-          // Tap → advert + Morse "A" on blue. digitalWrite keeps blue in
-          // pure GPIO mode so the LoRa TX LED indicator still works.
-          Serial.println("Tap -> sending advert");
-          the_mesh.sendSelfAdvertisement(16000, false);
-          digitalWrite(PIN_LED_BLUE, HIGH); delay(M6_MORSE_DOT_MS);
-          digitalWrite(PIN_LED_BLUE, LOW);  delay(M6_MORSE_GAP_MS);
-          digitalWrite(PIN_LED_BLUE, HIGH); delay(M6_MORSE_DASH_MS);
-          digitalWrite(PIN_LED_BLUE, LOW);
-        }
-      }
-      m6BtnDownAt = 0;
-    }
+#ifdef THINKNODE_M6
+  if (board.checkButton()) {
+    the_mesh.sendSelfAdvertisement(16000, false);
   }
 #endif
 
