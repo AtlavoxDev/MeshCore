@@ -22,6 +22,10 @@ public:
   ThinkNodeM6Board() : NRF52Board("THINKNODE_M6_OTA") {}
   void begin();
   uint16_t getBattMilliVolts() override;
+
+  // Called at the very end of setup() to mark "boot complete": stops the
+  // disk-activity-style blue flicker started in begin(), turns the red LED
+  // off, and flashes the blue LED for 100 ms.
   void bootComplete();
 
 #if defined(P_LORA_TX_LED)
@@ -37,20 +41,5 @@ public:
     return "Elecrow ThinkNode M6";
   }
 
-  void powerOff() override {
-    // Turn off LEDs so the device visually confirms a clean shutdown.
-    digitalWrite(PIN_LED_RED,  LOW);
-    digitalWrite(PIN_LED_BLUE, LOW);
-    #ifdef P_LORA_TX_LED
-    digitalWrite(P_LORA_TX_LED, LOW);
-    #endif
-
-    // Break the soft-power latch — on battery, this physically cuts MCU power.
-    digitalWrite(PIN_PWR_EN, LOW);
-
-    // Belt-and-braces: if USB is providing power, the latch drop won't kill the chip.
-    sd_power_system_off();
-
-    while (1) {}  // unreachable
-  }
+  void powerOff() override;
 };
