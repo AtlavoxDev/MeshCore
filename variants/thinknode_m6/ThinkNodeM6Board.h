@@ -33,7 +33,7 @@ public:
 
   // Polls the function button. Drives LED feedback during a hold and
   // calls powerOff() internally on a long press (>= 2 s).
-  void pollButton();
+  void pollButton() override;
 
 #if defined(P_LORA_TX_LED)
   void onBeforeTransmit() override {

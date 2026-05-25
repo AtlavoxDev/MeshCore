@@ -56,6 +56,10 @@ public:
   // Boards may override to stop a boot-indicator LED sequence or similar.
   // Default no-op: boards that don't care need not implement anything.
   virtual void onBootComplete() { /* no op */ }
+  // Called once per loop() iteration from example main loops. Boards with
+  // physical buttons may override to poll for user input (e.g., hold-to-
+  // power-off). Default no-op: boards without buttons need not implement.
+  virtual void pollButton() { /* no op */ }
   virtual void sleep(uint32_t secs)  { /* no op */ }
   virtual uint32_t getGpio() { return 0; }
   virtual void setGpio(uint32_t values) {}

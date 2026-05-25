@@ -124,6 +124,8 @@ void setup() {
 }
 
 void loop() {
+  board.pollButton();
+
   modem->loop();
 
   if (!modem->isActuallyTransmitting()) {

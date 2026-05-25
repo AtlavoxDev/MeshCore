@@ -30,9 +30,11 @@
 #define LED_STATE_ON            (1)     // State when LED is litted
 
 // Buttons
-#define PIN_BUTTON1             (13)
-#define PIN_BUTTON2             (20)
-#define PIN_USER_BTN            PIN_BUTTON1
+// Physical buttons are silkscreened PWR / RST / USR (left to right).
+// RST is hardwired to the nRF52 reset line and is not exposed as a GPIO,
+// so only PWR and USR are defined here.
+#define PIN_PWR_BTN             (13)   // PWR (leftmost): wake source + hold-to-power-off
+#define PIN_USER_BTN            (20)   // USR (rightmost): general-purpose, currently unused
 
 #define VBAT_ENABLE             (19)    // Output LOW to enable reading of the BAT voltage.
 

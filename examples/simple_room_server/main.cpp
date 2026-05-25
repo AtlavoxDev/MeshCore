@@ -109,6 +109,8 @@ void loop() {
     command[0] = 0;  // reset command buffer
   }
 
+  board.pollButton();
+
   the_mesh.loop();
   sensors.loop();
 #ifdef DISPLAY_CLASS

@@ -35,10 +35,8 @@ void SenseCapSolarBoard::begin() {
   analogReference(AR_INTERNAL_3_0);
   delay(50);
 
-#ifdef PIN_USER_BTN
-  pinMode(PIN_USER_BTN, INPUT_PULLUP);
-#elif defined(PIN_BUTTON1)
-  pinMode(PIN_BUTTON1, INPUT_PULLUP);
+#ifdef PIN_PWR_BTN
+  pinMode(PIN_PWR_BTN, INPUT_PULLUP);
 #endif
 
 #if defined(PIN_WIRE_SDA) && defined(PIN_WIRE_SCL)
