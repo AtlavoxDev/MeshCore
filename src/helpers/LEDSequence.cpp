@@ -15,6 +15,7 @@ static constexpr uint32_t BOOT_DARK2_US        = 1000000;  // 1.0s gap before fi
 static constexpr uint32_t BOOT_FLASH_US        =  100000;  // 100ms closing flash
 static constexpr uint32_t FLICKER_MIN_US       =   10000;  // 10ms min interval
 static constexpr uint32_t FLICKER_RANGE_US     =   90000;  // +0-90ms jitter
+static constexpr uint32_t FLICKER_MIN_TICKS    =      10;  // always flicker ≥ ~550ms even on fast boot
 static constexpr uint32_t FLICKER_SAFETY_TICKS =     300;  // ~16s fallback cap
 static constexpr uint32_t POWEROFF_SOLID_MS    =    1000;
 static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =    50;
@@ -126,8 +127,12 @@ static void advance_boot_state() {
 
     case BOOT_LED_FLICKER:
       // Check exit BEFORE toggling so onBootComplete() shortcuts cleanly.
+      // Require a minimum tick count so fast-boot devices (whose setup()
+      // finishes before BRIGHT+DARK1 elapse) still get a visible flicker
+      // instead of immediately bailing on the first tick.
       s_flicker_ticks++;
-      if (s_flicker_exit || s_flicker_ticks > FLICKER_SAFETY_TICKS) {
+      if ((s_flicker_exit && s_flicker_ticks >= FLICKER_MIN_TICKS) ||
+           s_flicker_ticks > FLICKER_SAFETY_TICKS) {
         setLEDs(false, false);
         s_boot_state = BOOT_LED_DARK2;
         arm_timer_us(BOOT_DARK2_US);
