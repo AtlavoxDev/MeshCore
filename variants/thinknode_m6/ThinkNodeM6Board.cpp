@@ -202,17 +202,21 @@ void ThinkNodeM6Board::begin() {
   // next reset starts from a clean "I'm running" state.
   NRF_POWER->GPREGRET2 = 0;
 
+  // Initialize P_LORA_TX_LED *before* startBootSequence(). On M6 this pin
+  // maps to PIN_LED_BLUE, so writing LOW here after startBootSequence would
+  // immediately stomp on the BOTH_BRIGHT state and the blue LED would never
+  // appear lit during the initial 1-second burst.
+#ifdef P_LORA_TX_LED
+  pinMode(P_LORA_TX_LED, OUTPUT);
+  digitalWrite(P_LORA_TX_LED, LOW);
+#endif
+
   // Kick off the boot LED state machine. Non-blocking — TIMER2 drives the
   // entire sequence (bright → dark → solid + flicker → dark → flash) in the
   // background while setup() proceeds. onBootComplete() ends the FLICKER phase.
   startBootSequence();
 
   Wire.begin();
-
-#ifdef P_LORA_TX_LED
-  pinMode(P_LORA_TX_LED, OUTPUT);
-  digitalWrite(P_LORA_TX_LED, LOW);
-#endif
 
   delay(10); // give sx1262 some time to power up
 }
