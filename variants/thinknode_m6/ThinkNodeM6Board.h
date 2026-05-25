@@ -18,21 +18,17 @@ protected:
   void initiateShutdown(uint8_t reason) override;
 #endif
 
-private:
-  unsigned long _btn_down_at = 0;  // function-button press timestamp (0 = not pressed)
-
 public:
   ThinkNodeM6Board() : NRF52Board("THINKNODE_M6_OTA") {}
   void begin();
   uint16_t getBattMilliVolts() override;
 
-  // Called at the end of setup(). Signals the boot LED state machine to
-  // exit the flicker phase; the final dark gap + blue flash run async via
-  // the TIMER2 ISR. Returns immediately.
+  // Forwards to LEDSequence::onBootComplete() so the framework's TIMER2
+  // state machine exits the FLICKER phase and plays out the final flash.
   void onBootComplete() override;
 
-  // Polls the function button. Drives LED feedback during a hold and
-  // calls powerOff() internally on a long press (>= 2 s).
+  // Forwards to LEDSequence::pollPowerButton() for hold-to-power-off with
+  // canonical mid-hold LED feedback. Commits to powerOff() at 2 s held.
   void pollButton() override;
 
 #if defined(P_LORA_TX_LED)
