@@ -25,9 +25,10 @@
  * milliseconds" with consistent visual feedback can use it.
  *
  * Assumes active-low buttons with internal pull-up (the convention used by
- * every existing MeshCore variant). Boards must call pinMode(pin,
- * INPUT_PULLUP) themselves — begin() does not configure the button pin so
- * it doesn't fight with board-level pin setup.
+ * every existing MeshCore variant). begin() configures the pin as
+ * INPUT_PULLUP internally (via the underlying MomentaryButton instance);
+ * if the board also calls pinMode() earlier in its own begin() (e.g., for
+ * SYSTEMOFF wake configuration) the result is the same.
  *
  * Visual cadence (threshold split into 2 measures × 4 beats = 8 beats):
  *   Measure 1, beat 1: single brief blink ("I see you" cue)
@@ -39,12 +40,16 @@
  * beats, 1500 ms => ~187 ms beats, etc).
  *
  * Relationship to MomentaryButton:
- *   src/helpers/ui/MomentaryButton handles click/double-click/triple-click/
- *   long-press *edge events*. HoldButton handles *progressive mid-hold
- *   state* — what MomentaryButton would need a heldFor() accessor to
- *   support. Use MomentaryButton for click-count UX, HoldButton for
- *   hold-with-feedback UX. They can coexist on the same physical button
- *   if a board wants both (with care around shared digitalRead overhead).
+ *   HoldButton is a thin wrapper around src/helpers/ui/MomentaryButton —
+ *   it owns a private MomentaryButton instance and uses its long-press
+ *   event for the trigger, plus its heldFor() accessor for the mid-hold
+ *   feedback timing. All actual button polling and debounce live in
+ *   MomentaryButton; HoldButton is purely the feedback rendering layer.
+ *
+ *   If a board needs other button UX (multi-click, etc.) on the same pin,
+ *   it can still instantiate a separate MomentaryButton — be aware both
+ *   would be doing digitalRead on the same pin (~microseconds of wasted
+ *   work per loop iteration, no functional conflict).
  *
  * Singleton: one HoldButton per board. If you ever need multiple hold-
  * detect buttons on the same device, this helper would need to be

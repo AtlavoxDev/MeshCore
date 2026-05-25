@@ -51,6 +51,11 @@ void MomentaryButton::cancelClick() {
   _pending_click = false;
 }
 
+unsigned long MomentaryButton::heldFor() const {
+  if (down_at == 0) return 0;
+  return (unsigned long)(millis() - down_at);
+}
+
 bool MomentaryButton::isPressed(int level) const {
   if (_threshold > 0) {
     return level;

@@ -30,4 +30,11 @@ public:
   void cancelClick();  // suppress next BUTTON_EVENT_CLICK (if already in DOWN state)
   uint8_t getPin() { return _pin; }
   bool isPressed() const;
+
+  // Returns current hold duration in milliseconds, or 0 if the button is
+  // not pressed (or if a long-press event has already fired this press).
+  // Useful for rendering mid-hold UI feedback during a sustained press.
+  // Call check() each loop iteration to keep the internal state current
+  // before reading heldFor().
+  unsigned long heldFor() const;
 };
