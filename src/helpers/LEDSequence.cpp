@@ -3,40 +3,21 @@
 #include <Arduino.h>
 
 #if defined(NRF52_PLATFORM)
-  // Use nRF52 SDK headers directly for hardware-timer access.
   #include <nrf.h>
 #elif defined(ESP32)
   #include <esp_timer.h>
 #endif
 
-// ============================================================================
-// Canonical timing constants — single source of truth for all opted-in boards
-// ============================================================================
-
-// Boot sequence timings (microseconds for hardware-timer platforms;
-// converted to ms via /1000 for synchronous fallback).
-static constexpr uint32_t BOOT_BRIGHT_US   = 1000000;  // 1.0 s — both LEDs solid on
-static constexpr uint32_t BOOT_DARK1_US    = 1000000;  // 1.0 s — both off
-static constexpr uint32_t BOOT_DARK2_US    = 1000000;  // 1.0 s — final gap before BOOT_FLASH
-static constexpr uint32_t BOOT_FLASH_US    =  100000;  // 100 ms — closing flash
-
-// FLICKER phase: each tick chooses a random interval in [MIN, MIN+RANGE) µs.
-static constexpr uint32_t FLICKER_MIN_US   =   10000;  // 10 ms
-static constexpr uint32_t FLICKER_RANGE_US =   90000;  // + 0–90 ms (= 10–100 ms total)
-
-// Safety: cap total flicker ticks so a forgotten onBootComplete() doesn't
-// leave the LEDs flickering forever. At ~55 ms avg interval, 300 ticks ≈ 16 s.
-static constexpr uint32_t FLICKER_SAFETY_TICKS = 300;
-
-// Power-off cue timings (synchronous, ms units).
-static constexpr uint32_t POWEROFF_SOLID_MS      = 1000;
-static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =   50;
-
-
-// ============================================================================
-// Boot-sequence state machine (driven asynchronously where supported,
-// or synchronously by the fallback path)
-// ============================================================================
+// Timing constants (microseconds for hardware-timer platforms).
+static constexpr uint32_t BOOT_BRIGHT_US       = 1000000;  // 1.0s both LEDs on
+static constexpr uint32_t BOOT_DARK1_US        = 1000000;  // 1.0s gap before flicker
+static constexpr uint32_t BOOT_DARK2_US        = 1000000;  // 1.0s gap before final flash
+static constexpr uint32_t BOOT_FLASH_US        =  100000;  // 100ms closing flash
+static constexpr uint32_t FLICKER_MIN_US       =   10000;  // 10ms min interval
+static constexpr uint32_t FLICKER_RANGE_US     =   90000;  // +0-90ms jitter
+static constexpr uint32_t FLICKER_SAFETY_TICKS =     300;  // ~16s fallback cap
+static constexpr uint32_t POWEROFF_SOLID_MS    =    1000;
+static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =    50;
 
 enum BootLedState : uint8_t {
   BOOT_LED_IDLE = 0,
@@ -47,15 +28,15 @@ enum BootLedState : uint8_t {
   BOOT_LED_FLASH,
 };
 
-// Shared state (volatile because mutated from ISR/timer callback on async platforms)
-static LEDSequence::Config       s_cfg               = {};
-static bool                      s_enabled           = false;  // true once begin() with valid pins
-static volatile BootLedState     s_boot_state        = BOOT_LED_IDLE;
-static volatile bool             s_flicker_exit      = false;
-static volatile bool             s_flicker_blue_on   = false;
-static volatile uint32_t         s_flicker_ticks     = 0;
+// volatile: mutated from ISR/timer callback on async platforms
+static LEDSequence::Config   s_cfg             = {};
+static bool                  s_enabled         = false;
+static volatile BootLedState s_boot_state      = BOOT_LED_IDLE;
+static volatile bool         s_flicker_exit    = false;
+static volatile bool         s_flicker_blue_on = false;
+static volatile uint32_t     s_flicker_ticks   = 0;
 
-// xorshift32 PRNG for flicker jitter — fast, deterministic, runs in ISR safely.
+// xorshift32 PRNG — ISR-safe (no malloc, no globals beyond s_rng).
 static uint32_t s_rng = 0xC0FFEE42;
 static inline uint32_t next_random() {
   uint32_t x = s_rng;
@@ -65,10 +46,6 @@ static inline uint32_t next_random() {
   s_rng = x;
   return x;
 }
-
-// ============================================================================
-// Low-level LED pin write — handles active-level inversion + null-pin safety
-// ============================================================================
 
 static inline void writePin(int8_t pin, bool on) {
   if (pin < 0) return;
@@ -80,49 +57,38 @@ static inline void setLEDs(bool primary_on, bool secondary_on) {
   writePin(s_cfg.secondary_pin, secondary_on);
 }
 
-// ============================================================================
-// Platform-specific timer arm/disarm
-// ============================================================================
-
 #if defined(NRF52_PLATFORM)
-// --- NRF52: use TIMER2 hardware peripheral with ISR ---
-
+// NRF52: use TIMER2 hardware peripheral with ISR
 static void arm_timer_us(uint32_t microseconds) {
   NRF_TIMER2->CC[0] = microseconds;
   NRF_TIMER2->TASKS_CLEAR = 1;
 }
-
 static void start_timer() {
   NRF_TIMER2->TASKS_STOP = 1;
   NRF_TIMER2->MODE      = TIMER_MODE_MODE_Timer;
   NRF_TIMER2->BITMODE   = TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos;
   NRF_TIMER2->PRESCALER = 4;  // 16 MHz / 2^4 = 1 MHz tick (1 µs)
   NRF_TIMER2->INTENSET  = TIMER_INTENSET_COMPARE0_Msk;
-  NVIC_SetPriority(TIMER2_IRQn, 7);  // low priority
+  NVIC_SetPriority(TIMER2_IRQn, 7);
   NVIC_ClearPendingIRQ(TIMER2_IRQn);
   NVIC_EnableIRQ(TIMER2_IRQn);
   NRF_TIMER2->TASKS_START = 1;
 }
-
 static void stop_timer() {
   NRF_TIMER2->TASKS_STOP = 1;
   NRF_TIMER2->INTENCLR   = TIMER_INTENCLR_COMPARE0_Msk;
   NVIC_DisableIRQ(TIMER2_IRQn);
 }
-
 #elif defined(ESP32)
-// --- ESP32: use esp_timer (FreeRTOS-task-backed callbacks, no ISR restrictions) ---
-
+// ESP32: use esp_timer (FreeRTOS-task-backed; no ISR restrictions)
 static esp_timer_handle_t s_esp_timer = nullptr;
-static void esp_timer_callback(void* arg);  // forward
-
+static void esp_timer_callback(void* arg);
 static void arm_timer_us(uint32_t microseconds) {
   if (s_esp_timer) {
     esp_timer_stop(s_esp_timer);
     esp_timer_start_once(s_esp_timer, microseconds);
   }
 }
-
 static void start_timer() {
   if (!s_esp_timer) {
     esp_timer_create_args_t args = {};
@@ -131,38 +97,27 @@ static void start_timer() {
     esp_timer_create(&args, &s_esp_timer);
   }
 }
-
 static void stop_timer() {
-  if (s_esp_timer) {
-    esp_timer_stop(s_esp_timer);
-  }
+  if (s_esp_timer) esp_timer_stop(s_esp_timer);
 }
-
 #else
-// --- Fallback: no async timer. Timer arm/start/stop are all no-ops. ---
+// Fallback: no hardware timer
 static inline void arm_timer_us(uint32_t) {}
 static inline void start_timer()          {}
 static inline void stop_timer()           {}
 #endif
 
-// ============================================================================
-// Boot state machine advance — platform-agnostic core called from ISR/callback
-// ============================================================================
-
-// Single state transition. Sets LEDs, decides next interval, arms timer.
-// On the IDLE / FLASH→done transition, also stops the timer entirely.
+// Single state transition. Called from ISR/timer callback.
 static void advance_boot_state() {
   switch (s_boot_state) {
     case BOOT_LED_BRIGHT:
-      // Exit BRIGHT (both LEDs were HIGH from playBoot). Enter DARK1.
       setLEDs(false, false);
       s_boot_state = BOOT_LED_DARK1;
       arm_timer_us(BOOT_DARK1_US);
       break;
 
     case BOOT_LED_DARK1:
-      // Enter FLICKER: primary solid on, secondary will toggle.
-      writePin(s_cfg.primary_pin, true);
+      writePin(s_cfg.primary_pin, true);  // primary solid for flicker phase
       s_flicker_blue_on = false;
       s_flicker_ticks   = 0;
       s_boot_state      = BOOT_LED_FLICKER;
@@ -170,16 +125,13 @@ static void advance_boot_state() {
       break;
 
     case BOOT_LED_FLICKER:
-      // Check exit conditions BEFORE toggling so a fast onBootComplete()
-      // shortcuts the flicker cleanly.
+      // Check exit BEFORE toggling so onBootComplete() shortcuts cleanly.
       s_flicker_ticks++;
       if (s_flicker_exit || s_flicker_ticks > FLICKER_SAFETY_TICKS) {
-        // Enter DARK2.
         setLEDs(false, false);
         s_boot_state = BOOT_LED_DARK2;
         arm_timer_us(BOOT_DARK2_US);
       } else {
-        // Continue flicker: toggle secondary (or primary if no secondary).
         s_flicker_blue_on = !s_flicker_blue_on;
         int8_t flick_pin = (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin
                                                        : s_cfg.primary_pin;
@@ -188,19 +140,16 @@ static void advance_boot_state() {
       }
       break;
 
-    case BOOT_LED_DARK2:
-      // Enter FLASH: brief secondary (or primary fallback) closing flash.
-      {
-        int8_t flash_pin = (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin
-                                                       : s_cfg.primary_pin;
-        writePin(flash_pin, true);
-      }
+    case BOOT_LED_DARK2: {
+      int8_t flash_pin = (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin
+                                                     : s_cfg.primary_pin;
+      writePin(flash_pin, true);
       s_boot_state = BOOT_LED_FLASH;
       arm_timer_us(BOOT_FLASH_US);
       break;
+    }
 
     case BOOT_LED_FLASH:
-      // Enter IDLE: LEDs off, stop the timer.
       setLEDs(false, false);
       s_boot_state = BOOT_LED_IDLE;
       stop_timer();
@@ -208,15 +157,10 @@ static void advance_boot_state() {
 
     case BOOT_LED_IDLE:
     default:
-      // Safety net — shouldn't happen but ensure the timer stops.
-      stop_timer();
+      stop_timer();  // safety net
       break;
   }
 }
-
-// ============================================================================
-// Platform-specific timer entry points → call into advance_boot_state()
-// ============================================================================
 
 #if defined(NRF52_PLATFORM)
 extern "C" void TIMER2_IRQHandler(void) {
@@ -231,14 +175,8 @@ static void esp_timer_callback(void* /*arg*/) {
 }
 #endif
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 void LEDSequence::begin(const LEDSequence::Config& cfg) {
-  s_cfg = cfg;
-  // "Enabled" means we have at least a primary LED OR a buzzer to drive.
-  // Boards with no feedback hardware get all no-op behavior.
+  s_cfg     = cfg;
   s_enabled = (cfg.primary_pin >= 0) || (cfg.buzzer_pin >= 0);
 
   if (cfg.primary_pin >= 0) {
@@ -249,21 +187,16 @@ void LEDSequence::begin(const LEDSequence::Config& cfg) {
     pinMode(cfg.secondary_pin, OUTPUT);
     writePin(cfg.secondary_pin, false);
   }
-  // Buzzer pin init is deferred to the buzzer integration — left as a
-  // future extension since none of the initial opt-in boards have buzzers
-  // wired through this helper yet.
+  // TODO: buzzer pin init when buzzer integration lands
 
-  s_boot_state    = BOOT_LED_IDLE;
-  s_flicker_exit  = false;
+  s_boot_state   = BOOT_LED_IDLE;
+  s_flicker_exit = false;
 }
 
 void LEDSequence::playBoot() {
   if (!s_enabled) return;
 
 #if defined(NRF52_PLATFORM) || defined(ESP32)
-  // Async path: set initial BRIGHT state, arm timer, return immediately.
-  // The state machine runs in the background via interrupts/callbacks while
-  // setup() continues with radio/SPI/BLE init in parallel.
   s_flicker_exit  = false;
   s_flicker_ticks = 0;
   setLEDs(true, true);
@@ -271,10 +204,9 @@ void LEDSequence::playBoot() {
   start_timer();
   arm_timer_us(BOOT_BRIGHT_US);
 #else
-  // Fallback path: no hardware timer available. Set LEDs ON statically
-  // and return immediately. onBootComplete() will turn them off + flash.
+  // No hardware timer: LEDs stay on until onBootComplete().
   setLEDs(true, true);
-  s_boot_state = BOOT_LED_BRIGHT;  // tracked so onBootComplete knows
+  s_boot_state = BOOT_LED_BRIGHT;
 #endif
 }
 
@@ -282,11 +214,9 @@ void LEDSequence::onBootComplete() {
   if (!s_enabled) return;
 
 #if defined(NRF52_PLATFORM) || defined(ESP32)
-  // Async path: just signal the FLICKER state to exit on its next tick.
-  // The remaining DARK2 + FLASH + off phases play out in the background.
-  s_flicker_exit = true;
+  s_flicker_exit = true;  // ISR sees this on next tick and runs DARK2 + FLASH
 #else
-  // Fallback path: do a synchronous final flash and turn LEDs off.
+  // Sync fallback: final flash, then off.
   if (s_boot_state == BOOT_LED_IDLE) return;
   setLEDs(false, false);
   delay(BOOT_DARK2_US / 1000);
@@ -309,25 +239,19 @@ void LEDSequence::cancel() {
 }
 
 void LEDSequence::playPowerOff() {
-  // Power-off cue is always synchronous — there's no reason to be async
-  // here (the device is about to sleep anyway).
   if (!s_enabled) return;
+  cancel();  // stop any running boot sequence before we take over the pins
 
-  // Make sure the boot sequence isn't still running and won't race with us.
-  cancel();
-
-  // SOLID: primary full bright for 1 second.
+  // SOLID: primary on, secondary off, 1s
   writePin(s_cfg.primary_pin,   true);
   writePin(s_cfg.secondary_pin, false);
   delay(POWEROFF_SOLID_MS);
 
-  // DUAL_FLASH: both LEDs (or just primary on 1-LED boards) for 50 ms.
+  // DUAL_FLASH: both on, 50ms
   writePin(s_cfg.primary_pin,   true);
   writePin(s_cfg.secondary_pin, true);
   delay(POWEROFF_DUAL_FLASH_MS);
 
-  // Off.
   setLEDs(false, false);
-
-  // TODO: buzzer descending shutdown tone (when buzzer integration lands).
+  // TODO: buzzer descending shutdown tone
 }

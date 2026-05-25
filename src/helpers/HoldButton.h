@@ -3,74 +3,27 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-/**
- * HoldButton — generic hold-to-trigger detection with progressive LED feedback.
- *
- * Reads a configured GPIO every poll() call, tracks hold duration, drives
- * an optional LED for mid-hold "are you sure?" feedback, and returns true
- * once the button has been held continuously past the threshold. The caller
- * decides what to do with the trigger:
- *
- *   if (HoldButton::poll()) {
- *     powerOff();           // hold-to-power-off (most common use)
- *   }
- *
- *   // or just as easily:
- *   if (HoldButton::poll()) {
- *     enterPairingMode();   // hold-to-pair
- *   }
- *
- * The class is intentionally purpose-agnostic. M6 happens to use it for
- * power-off, but any board feature that wants "hold the button for N
- * milliseconds" with consistent visual feedback can use it.
- *
- * Assumes active-low buttons with internal pull-up (the convention used by
- * every existing MeshCore variant). begin() configures the pin as
- * INPUT_PULLUP internally (via the underlying MomentaryButton instance);
- * if the board also calls pinMode() earlier in its own begin() (e.g., for
- * SYSTEMOFF wake configuration) the result is the same.
- *
- * Visual cadence (threshold split into 2 measures × 4 beats = 8 beats):
- *   Measure 1, beat 1: single brief blink ("I see you" cue)
- *   Measure 1, beats 2-4: dark
- *   Measure 2, every beat: flash (4 escalating flashes)
- *   Measure 3, beat 1: poll() returns true; caller acts on trigger
- *
- * Pattern proportions scale cleanly to any threshold (2000 ms => 250 ms
- * beats, 1500 ms => ~187 ms beats, etc).
- *
- * Relationship to MomentaryButton:
- *   HoldButton is a thin wrapper around src/helpers/ui/MomentaryButton —
- *   it owns a private MomentaryButton instance and uses its long-press
- *   event for the trigger, plus its heldFor() accessor for the mid-hold
- *   feedback timing. All actual button polling and debounce live in
- *   MomentaryButton; HoldButton is purely the feedback rendering layer.
- *
- *   If a board needs other button UX (multi-click, etc.) on the same pin,
- *   it can still instantiate a separate MomentaryButton — be aware both
- *   would be doing digitalRead on the same pin (~microseconds of wasted
- *   work per loop iteration, no functional conflict).
- *
- * Singleton: one HoldButton per board. If you ever need multiple hold-
- * detect buttons on the same device, this helper would need to be
- * re-architected around instances. No current board needs that.
- */
+// Generic hold-to-trigger detection with beat-based mid-hold LED feedback.
+// Thin wrapper over MomentaryButton (long-press event = trigger, heldFor() =
+// feedback timing). Singleton — one HoldButton per board.
+//
+// Caller invokes whatever action on trigger:
+//   if (HoldButton::poll()) powerOff();        // hold-to-power-off (M6)
+//   if (HoldButton::poll()) enterPairMode();   // hold-to-pair (hypothetical)
+//
+// Visual cadence (threshold ÷ 8 beats):
+//   M1.1: opening blink, M1.2-4: dark, M2.*: 4 escalating flashes, M3.1: trigger
 class HoldButton {
 public:
   struct Config {
-    int8_t   pin           = -1;     ///< button GPIO. -1 disables polling entirely.
-    uint32_t threshold_ms  = 2000;   ///< hold duration to trigger.
-    int8_t   feedback_pin  = -1;     ///< LED for mid-hold feedback. -1 = no visual.
-    uint8_t  active_level  = HIGH;   ///< feedback LED active level (HIGH on most boards).
+    int8_t   pin           = -1;     // button GPIO; -1 disables poll()
+    uint32_t threshold_ms  = 2000;
+    int8_t   feedback_pin  = -1;     // -1 = no visual feedback
+    uint8_t  active_level  = HIGH;
   };
 
-  /// Configure pin mapping. Safe to call with pin = -1 on boards without
-  /// a hold-detect button — poll() then becomes a no-op that always returns false.
   static void begin(const Config& cfg);
 
-  /// Call once per loop iteration. Returns true at the moment the button
-  /// has been held for >= threshold_ms. Released before threshold: feedback
-  /// LED clears, internal hold tracker resets, returns false. Subsequent
-  /// presses start over from beat 1.1.
+  // Call once per loop. Returns true at the moment threshold is reached.
   static bool poll();
 };

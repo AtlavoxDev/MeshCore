@@ -23,21 +23,12 @@ public:
   void begin();
   uint16_t getBattMilliVolts() override;
 
-  // Forwards to LEDSequence::onBootComplete() so the framework's TIMER2
-  // state machine exits the FLICKER phase and plays out the final flash.
-  void onBootComplete() override;
-
-  // Forwards to LEDSequence::pollPowerButton() for hold-to-power-off with
-  // canonical mid-hold LED feedback. Commits to powerOff() at 2 s held.
-  void pollButton() override;
+  void onBootComplete() override;  // exits boot FLICKER → final flash → off
+  void pollButton() override;      // hold 2s → powerOff()
 
 #if defined(P_LORA_TX_LED)
-  void onBeforeTransmit() override {
-    digitalWrite(P_LORA_TX_LED, HIGH);   // turn TX LED on
-  }
-  void onAfterTransmit() override {
-    digitalWrite(P_LORA_TX_LED, LOW);   // turn TX LED off
-  }
+  void onBeforeTransmit() override { digitalWrite(P_LORA_TX_LED, HIGH); }
+  void onAfterTransmit()  override { digitalWrite(P_LORA_TX_LED, LOW);  }
 #endif
 
   const char* getManufacturerName() const override {
