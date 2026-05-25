@@ -104,9 +104,7 @@ void setup() {
   the_mesh.sendSelfAdvertisement(16000, false);
 #endif
 
-#ifdef THINKNODE_M6
   board.bootComplete();
-#endif
 }
 
 void loop() {

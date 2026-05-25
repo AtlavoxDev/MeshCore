@@ -28,7 +28,7 @@ public:
 
   // Called at the end of setup(). Stops the disk-activity blue flicker
   // started in begin() and flashes the blue LED briefly.
-  void bootComplete();
+  void bootComplete() override;
 
   // Polls the function button. Drives LED feedback during a hold and
   // calls powerOff() internally on a long press (>= 2 s).
