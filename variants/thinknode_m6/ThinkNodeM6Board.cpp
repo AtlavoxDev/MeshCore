@@ -15,12 +15,27 @@
 #define M6_OFF_COMMIT_MS        2000
 #define M6_OFF_FLASH_BRIGHT     128   // ~50% of 255
 
-// Boot-phase blue LED flicker. TIMER2 fires at pseudo-random 10-100 ms
-// intervals; the ISR toggles the blue LED. Runs in the background through
-// every blocking call in setup() (mesh init, etc.).
-static volatile bool s_flicker_blue_on = false;
-static uint32_t s_flicker_rng = 0xC0FFEE42;
+// Boot LED state machine — fully async, driven by the TIMER2 ISR.
+// begin() kicks it off and returns immediately; setup() proceeds in parallel
+// with the LED choreography. bootComplete() signals the FLICKER state to
+// exit and advance toward DONE. A safety tick counter ensures the sequence
+// completes even if bootComplete() is never called.
+enum BootLedState : uint8_t {
+  BOOT_LED_IDLE = 0,
+  BOOT_LED_BOTH_BRIGHT,
+  BOOT_LED_DARK1,
+  BOOT_LED_FLICKER,
+  BOOT_LED_DARK2,
+  BOOT_LED_BOOT_FLASH,
+};
 
+static volatile BootLedState s_boot_state = BOOT_LED_IDLE;
+static volatile bool         s_flicker_exit_requested = false;
+static volatile bool         s_flicker_blue_on        = false;
+static volatile uint32_t     s_flicker_ticks          = 0;
+#define M6_FLICKER_SAFETY_TICKS  300  // ~15 s fallback at ~50 ms avg per tick
+
+static uint32_t s_flicker_rng = 0xC0FFEE42;
 // xorshift32 PRNG for flicker jitter.
 static inline uint32_t flicker_next_rand() {
   uint32_t x = s_flicker_rng;
@@ -32,38 +47,105 @@ static inline uint32_t flicker_next_rand() {
 }
 
 extern "C" void TIMER2_IRQHandler(void) {
-  if (NRF_TIMER2->EVENTS_COMPARE[0]) {
-    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
-    NRF_TIMER2->TASKS_CLEAR = 1;
+  if (!NRF_TIMER2->EVENTS_COMPARE[0]) return;
+  NRF_TIMER2->EVENTS_COMPARE[0] = 0;
+  NRF_TIMER2->TASKS_CLEAR = 1;
 
-    s_flicker_blue_on = !s_flicker_blue_on;
-    nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_BLUE], s_flicker_blue_on ? 1 : 0);
+  switch (s_boot_state) {
+    case BOOT_LED_BOTH_BRIGHT:
+      // Exit BOTH_BRIGHT (LEDs were set HIGH by startBootSequence). Enter DARK1.
+      nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_RED],  0);
+      nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_BLUE], 0);
+      s_boot_state = BOOT_LED_DARK1;
+      NRF_TIMER2->CC[0] = 1000000;  // 1 s
+      break;
 
-    NRF_TIMER2->CC[0] = 10000 + (flicker_next_rand() % 90000);  // 10-100 ms
+    case BOOT_LED_DARK1:
+      // Enter FLICKER: red solid on (the non-TX "power" LED).
+      nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_RED], 1);
+      s_flicker_blue_on = false;
+      s_flicker_ticks   = 0;
+      s_boot_state = BOOT_LED_FLICKER;
+      NRF_TIMER2->CC[0] = 10000 + (flicker_next_rand() % 90000);  // first blue toggle
+      break;
+
+    case BOOT_LED_FLICKER:
+      // Check exit conditions BEFORE toggling so a fast bootComplete() can
+      // shortcut the flicker cleanly.
+      s_flicker_ticks++;
+      if (s_flicker_exit_requested || s_flicker_ticks > M6_FLICKER_SAFETY_TICKS) {
+        // Enter DARK2.
+        nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_RED],  0);
+        nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_BLUE], 0);
+        s_boot_state = BOOT_LED_DARK2;
+        NRF_TIMER2->CC[0] = 1000000;  // 1 s gap before final flash
+      } else {
+        // Continue flicker: toggle blue (the TX LED), schedule next tick.
+        s_flicker_blue_on = !s_flicker_blue_on;
+        nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_BLUE], s_flicker_blue_on ? 1 : 0);
+        NRF_TIMER2->CC[0] = 10000 + (flicker_next_rand() % 90000);
+      }
+      break;
+
+    case BOOT_LED_DARK2:
+      // Enter BOOT_FLASH: brief blue flash to signal boot complete.
+      nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_BLUE], 1);
+      s_boot_state = BOOT_LED_BOOT_FLASH;
+      NRF_TIMER2->CC[0] = 100000;  // 100 ms
+      break;
+
+    case BOOT_LED_BOOT_FLASH:
+      // Enter DONE: LEDs off, stop the timer.
+      nrf_gpio_pin_write(g_ADigitalPinMap[PIN_LED_BLUE], 0);
+      s_boot_state = BOOT_LED_IDLE;
+      NRF_TIMER2->TASKS_STOP = 1;
+      NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+      NVIC_DisableIRQ(TIMER2_IRQn);
+      break;
+
+    case BOOT_LED_IDLE:
+    default:
+      // Should not happen — safety net.
+      NRF_TIMER2->TASKS_STOP = 1;
+      NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+      NVIC_DisableIRQ(TIMER2_IRQn);
+      break;
   }
 }
 
-static void startBootFlicker() {
+// Hard-stop the boot LED state machine. Used by powerOff() to prevent the
+// TIMER2 ISR from racing with the synchronous shutdown cue's analogWrite()s.
+static void stopBootSequence() {
+  NRF_TIMER2->TASKS_STOP = 1;
+  NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
+  NVIC_DisableIRQ(TIMER2_IRQn);
+  s_boot_state = BOOT_LED_IDLE;
+}
+
+// Kick off the boot LED state machine. Non-blocking — returns immediately.
+// Sets LEDs to the BOTH_BRIGHT initial state and configures TIMER2 to advance
+// the state machine in the background while setup() continues.
+static void startBootSequence() {
+  s_flicker_exit_requested = false;
+  s_flicker_blue_on        = false;
+  s_flicker_ticks          = 0;
+
+  // Initial visible state: both LEDs full bright.
+  digitalWrite(PIN_LED_RED,  HIGH);
+  digitalWrite(PIN_LED_BLUE, HIGH);
+  s_boot_state = BOOT_LED_BOTH_BRIGHT;
+
   NRF_TIMER2->TASKS_STOP = 1;
   NRF_TIMER2->MODE = TIMER_MODE_MODE_Timer;
   NRF_TIMER2->BITMODE = TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos;
   NRF_TIMER2->PRESCALER = 4;  // 16 MHz / 2^4 = 1 MHz tick (1 µs)
-  NRF_TIMER2->CC[0] = 30000;  // first toggle in ~30 ms
+  NRF_TIMER2->CC[0] = 1000000;  // BOTH_BRIGHT lasts 1 s, then ISR advances
   NRF_TIMER2->INTENSET = TIMER_INTENSET_COMPARE0_Msk;
   NVIC_SetPriority(TIMER2_IRQn, 7);  // low priority
   NVIC_ClearPendingIRQ(TIMER2_IRQn);
   NVIC_EnableIRQ(TIMER2_IRQn);
   NRF_TIMER2->TASKS_CLEAR = 1;
   NRF_TIMER2->TASKS_START = 1;
-}
-
-static void stopBootFlicker() {
-  NRF_TIMER2->TASKS_STOP = 1;
-  NRF_TIMER2->INTENCLR = TIMER_INTENCLR_COMPARE0_Msk;
-  NVIC_DisableIRQ(TIMER2_IRQn);
-  NVIC_ClearPendingIRQ(TIMER2_IRQn);
-  digitalWrite(PIN_LED_BLUE, LOW);
-  s_flicker_blue_on = false;
 }
 
 // Arm the Function Button as a SENSE-LOW wake source and enter SYSTEMOFF.
@@ -120,18 +202,10 @@ void ThinkNodeM6Board::begin() {
   // next reset starts from a clean "I'm running" state.
   NRF_POWER->GPREGRET2 = 0;
 
-  // Boot indicator: both LEDs full bright for 1 s.
-  digitalWrite(PIN_LED_RED,  HIGH);
-  digitalWrite(PIN_LED_BLUE, HIGH);
-  delay(1000);
-  digitalWrite(PIN_LED_RED,  LOW);
-  digitalWrite(PIN_LED_BLUE, LOW);
-
-  // 1-second gap, then red solid + blue disk-activity flicker. The flicker
-  // runs in the background via TIMER2 until bootComplete() stops it.
-  delay(1000);
-  digitalWrite(PIN_LED_RED, HIGH);
-  startBootFlicker();
+  // Kick off the boot LED state machine. Non-blocking — TIMER2 drives the
+  // entire sequence (bright → dark → solid + flicker → dark → flash) in the
+  // background while setup() proceeds. bootComplete() ends the FLICKER phase.
+  startBootSequence();
 
   Wire.begin();
 
@@ -144,6 +218,10 @@ void ThinkNodeM6Board::begin() {
 }
 
 void ThinkNodeM6Board::powerOff() {
+  // Make sure the boot LED state machine isn't still running and won't race
+  // with the analogWrite() calls below.
+  stopBootSequence();
+
 #ifdef P_LORA_TX_LED
   digitalWrite(P_LORA_TX_LED, LOW);
 #endif
@@ -189,14 +267,10 @@ uint16_t ThinkNodeM6Board::getBattMilliVolts() {
 }
 
 void ThinkNodeM6Board::bootComplete() {
-  // Stop the disk-activity flicker, dark 1 s gap, then 100 ms blue flash.
-  stopBootFlicker();
-  digitalWrite(PIN_LED_RED,  LOW);
-  digitalWrite(PIN_LED_BLUE, LOW);
-  delay(1000);
-  digitalWrite(PIN_LED_BLUE, HIGH);
-  delay(100);
-  digitalWrite(PIN_LED_BLUE, LOW);
+  // Signal the TIMER2 state machine to exit the FLICKER state. The ISR
+  // handles the rest of the sequence (dark 1 s gap + 100 ms blue flash + off).
+  // Returns immediately — the visual continues in the background.
+  s_flicker_exit_requested = true;
 }
 
 void ThinkNodeM6Board::pollButton() {

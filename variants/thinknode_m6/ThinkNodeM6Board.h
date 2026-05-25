@@ -26,8 +26,9 @@ public:
   void begin();
   uint16_t getBattMilliVolts() override;
 
-  // Called at the end of setup(). Stops the disk-activity blue flicker
-  // started in begin() and flashes the blue LED briefly.
+  // Called at the end of setup(). Signals the boot LED state machine to
+  // exit the flicker phase; the final dark gap + blue flash run async via
+  // the TIMER2 ISR. Returns immediately.
   void bootComplete() override;
 
   // Polls the function button. Drives LED feedback during a hold and
