@@ -32,21 +32,6 @@ static constexpr uint32_t FLICKER_SAFETY_TICKS = 300;
 static constexpr uint32_t POWEROFF_SOLID_MS      = 1000;
 static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =   50;
 
-// Mid-hold power-button feedback: beat-based cadence.
-// The hold threshold is divided into 2 measures × 4 beats = 8 beats total,
-// with each flash occupying the first half of its beat (50% duty cycle).
-//
-// Measure 1: single blink on beat 1 (the "I see you started pressing" cue).
-//   Beats 2-4 dark — calm/slow opening rhythm.
-// Measure 2: flash on every beat (4 flashes total).
-//   Escalating "you're about to commit" cue.
-// Measure 3, beat 1: commit (caller invokes powerOff() → SOLID phase).
-//
-// At a 2000 ms threshold: each beat is 250 ms, each flash is 125 ms.
-// At a 1500 ms threshold: each beat is ~187 ms, each flash is ~94 ms.
-// Pattern proportions stay constant regardless of threshold.
-static constexpr uint32_t HOLD_BEATS_PER_THRESHOLD = 8;
-static constexpr uint32_t HOLD_BEATS_PER_MEASURE   = 4;
 
 // ============================================================================
 // Boot-sequence state machine (driven asynchronously where supported,
@@ -80,9 +65,6 @@ static inline uint32_t next_random() {
   s_rng = x;
   return x;
 }
-
-// Hold tracker for pollPowerButton — separate state, separate concerns.
-static unsigned long s_hold_down_at = 0;
 
 // ============================================================================
 // Low-level LED pin write — handles active-level inversion + null-pin safety
@@ -348,53 +330,4 @@ void LEDSequence::playPowerOff() {
   setLEDs(false, false);
 
   // TODO: buzzer descending shutdown tone (when buzzer integration lands).
-}
-
-bool LEDSequence::pollPowerButton(int8_t pin, uint32_t threshold_ms) {
-  if (pin < 0) return false;
-
-  int btnState = digitalRead(pin);
-  if (btnState != LOW) {
-    // Button released. Clear feedback LEDs if we were tracking a hold.
-    if (s_hold_down_at != 0) {
-      setLEDs(false, false);
-      s_hold_down_at = 0;
-    }
-    return false;
-  }
-
-  // Button is pressed (assumes active-low — same convention as M6/SenseCAP).
-  if (s_hold_down_at == 0) {
-    s_hold_down_at = millis();
-  }
-  unsigned long held = millis() - s_hold_down_at;
-
-  // Commit?
-  if (held >= threshold_ms) {
-    // Caller will invoke powerOff(). Reset hold tracker so a quick release
-    // after powerOff() doesn't immediately re-fire.
-    s_hold_down_at = 0;
-    return true;
-  }
-
-  // Beat-based feedback. Split the threshold into 8 beats; first beat of
-  // measure 1 blinks, every beat of measure 2 flashes, measure 3 commits.
-  const uint32_t beat_duration_ms = threshold_ms / HOLD_BEATS_PER_THRESHOLD;
-  const uint32_t half_beat_ms     = beat_duration_ms / 2;
-  const uint32_t measure_2_start  = beat_duration_ms * HOLD_BEATS_PER_MEASURE;  // = threshold/2
-
-  bool led_on;
-  if (held < measure_2_start) {
-    // Measure 1: only beat 1's first half is on (single opening blink).
-    led_on = (held < half_beat_ms);
-  } else {
-    // Measure 2: first half of every beat is on (4 escalating flashes).
-    const uint32_t beat_phase = (held - measure_2_start) % beat_duration_ms;
-    led_on = (beat_phase < half_beat_ms);
-  }
-
-  writePin(s_cfg.primary_pin,   led_on);
-  writePin(s_cfg.secondary_pin, false);
-
-  return false;
 }

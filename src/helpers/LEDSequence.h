@@ -75,26 +75,4 @@ public:
   /// Sequence: primary solid (1s) → both LEDs flash (50ms) → off.
   /// Plays buzzer descending shutdown tone if buzzer_pin is configured.
   static void playPowerOff();
-
-  /// Poll a power-button pin for hold-to-power-off with progressive LED
-  /// feedback. Call once per loop iteration from the board's pollButton()
-  /// override. Returns true once the button has been held continuously for
-  /// at least threshold_ms — the board should then call its powerOff().
-  ///
-  /// Visual cadence (threshold split into 2 measures × 4 beats = 8 beats):
-  ///   Measure 1, beat 1: single brief blink (the "I see you" cue).
-  ///   Measure 1, beats 2-4: dark.
-  ///   Measure 2, every beat: flash (4 escalating flashes leading to commit).
-  ///   Measure 3, beat 1: caller invokes powerOff() (SOLID phase follows).
-  ///
-  /// At a 2000 ms threshold: each beat is 250 ms, each flash is 125 ms.
-  /// At a 1500 ms threshold: each beat is ~187 ms, each flash is ~94 ms.
-  ///
-  /// Released before threshold: LEDs go off, internal hold tracker resets,
-  /// returns false. Subsequent presses start over.
-  ///
-  /// Behaves correctly even if begin() was called with no LED pins —
-  /// returns true at threshold regardless, so 0-LED boards still get
-  /// hold-to-power-off functionality (just without visual feedback).
-  static bool pollPowerButton(int8_t pin, uint32_t threshold_ms);
 };

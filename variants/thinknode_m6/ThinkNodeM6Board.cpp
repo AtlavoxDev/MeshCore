@@ -5,10 +5,11 @@
 
 #include <Wire.h>
 #include <helpers/LEDSequence.h>
+#include <helpers/PowerButton.h>
 
-// Power-button hold threshold. The LEDSequence helper drives the canonical
-// mid-hold flash feedback (proportional to this threshold) and returns true
-// once the button has been held for the full duration.
+// Power-button hold threshold. PowerButton::poll() drives the canonical
+// mid-hold flash feedback (proportional to this threshold) on PIN_LED_RED
+// and returns true once the button has been held for the full duration.
 #define M6_OFF_COMMIT_MS  2000
 
 // Arm the Function Button as a SENSE-LOW wake source and enter SYSTEMOFF.
@@ -74,13 +75,20 @@ void ThinkNodeM6Board::begin() {
   // → DARK → FLASH → off) in the background while setup() continues with
   // radio/SPI/BLE init. onBootComplete() will short-circuit the FLICKER phase
   // at the end of setup().
-  LEDSequence::Config cfg;
-  cfg.primary_pin   = PIN_LED_RED;
-  cfg.secondary_pin = PIN_LED_BLUE;
-  cfg.buzzer_pin    = -1;           // M6 has no buzzer
-  cfg.active_level  = HIGH;         // M6 LEDs are active-high
-  LEDSequence::begin(cfg);
+  LEDSequence::Config led_cfg;
+  led_cfg.primary_pin   = PIN_LED_RED;
+  led_cfg.secondary_pin = PIN_LED_BLUE;
+  led_cfg.buzzer_pin    = -1;       // M6 has no buzzer
+  led_cfg.active_level  = HIGH;     // M6 LEDs are active-high
+  LEDSequence::begin(led_cfg);
   LEDSequence::playBoot();
+
+  PowerButton::Config btn_cfg;
+  btn_cfg.pin           = PIN_USER_BTN;
+  btn_cfg.threshold_ms  = M6_OFF_COMMIT_MS;
+  btn_cfg.feedback_pin  = PIN_LED_RED;  // mid-hold flashes use the red LED
+  btn_cfg.active_level  = HIGH;
+  PowerButton::begin(btn_cfg);
 
   Wire.begin();
 
@@ -135,10 +143,9 @@ void ThinkNodeM6Board::onBootComplete() {
 }
 
 void ThinkNodeM6Board::pollButton() {
-  // Delegate hold-to-power-off + mid-hold LED feedback to the framework.
-  // The 2000 ms threshold is M6's chosen UX; the helper handles all the
-  // pin reading, hold-time tracking, and progressive flash feedback.
-  if (LEDSequence::pollPowerButton(PIN_USER_BTN, M6_OFF_COMMIT_MS)) {
+  // PowerButton handles button polling, hold-time tracking, and the
+  // canonical mid-hold flash feedback. Configured in begin().
+  if (PowerButton::poll()) {
     Serial.println("Powering off...");
     powerOff();  // does not return
   }
