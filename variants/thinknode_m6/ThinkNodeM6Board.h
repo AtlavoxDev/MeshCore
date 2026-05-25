@@ -29,7 +29,7 @@ public:
   // Called at the end of setup(). Signals the boot LED state machine to
   // exit the flicker phase; the final dark gap + blue flash run async via
   // the TIMER2 ISR. Returns immediately.
-  void bootComplete() override;
+  void onBootComplete() override;
 
   // Polls the function button. Drives LED feedback during a hold and
   // calls powerOff() internally on a long press (>= 2 s).

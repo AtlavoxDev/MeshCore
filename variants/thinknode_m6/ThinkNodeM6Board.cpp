@@ -17,9 +17,9 @@
 
 // Boot LED state machine — fully async, driven by the TIMER2 ISR.
 // begin() kicks it off and returns immediately; setup() proceeds in parallel
-// with the LED choreography. bootComplete() signals the FLICKER state to
+// with the LED choreography. onBootComplete() signals the FLICKER state to
 // exit and advance toward DONE. A safety tick counter ensures the sequence
-// completes even if bootComplete() is never called.
+// completes even if onBootComplete() is never called.
 enum BootLedState : uint8_t {
   BOOT_LED_IDLE = 0,
   BOOT_LED_BOTH_BRIGHT,
@@ -70,7 +70,7 @@ extern "C" void TIMER2_IRQHandler(void) {
       break;
 
     case BOOT_LED_FLICKER:
-      // Check exit conditions BEFORE toggling so a fast bootComplete() can
+      // Check exit conditions BEFORE toggling so a fast onBootComplete() can
       // shortcut the flicker cleanly.
       s_flicker_ticks++;
       if (s_flicker_exit_requested || s_flicker_ticks > M6_FLICKER_SAFETY_TICKS) {
@@ -204,7 +204,7 @@ void ThinkNodeM6Board::begin() {
 
   // Kick off the boot LED state machine. Non-blocking — TIMER2 drives the
   // entire sequence (bright → dark → solid + flicker → dark → flash) in the
-  // background while setup() proceeds. bootComplete() ends the FLICKER phase.
+  // background while setup() proceeds. onBootComplete() ends the FLICKER phase.
   startBootSequence();
 
   Wire.begin();
@@ -266,7 +266,7 @@ uint16_t ThinkNodeM6Board::getBattMilliVolts() {
   return (uint16_t)((float)adcvalue * REAL_VBAT_MV_PER_LSB);
 }
 
-void ThinkNodeM6Board::bootComplete() {
+void ThinkNodeM6Board::onBootComplete() {
   // Signal the TIMER2 state machine to exit the FLICKER state. The ISR
   // handles the rest of the sequence (dark 1 s gap + 100 ms blue flash + off).
   // Returns immediately — the visual continues in the background.
