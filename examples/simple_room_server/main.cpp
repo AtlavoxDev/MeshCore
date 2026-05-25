@@ -20,6 +20,7 @@ static char command[MAX_POST_TEXT_LEN+1];
 
 void setup() {
   Serial.begin(115200);
+  board.onWake();
   delay(1000);
 
   board.begin();

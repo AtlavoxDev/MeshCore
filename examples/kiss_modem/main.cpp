@@ -74,6 +74,7 @@ void onGetStats(uint32_t* rx, uint32_t* tx, uint32_t* errors) {
 }
 
 void setup() {
+  board.onWake();
   board.begin();
 
   if (!radio_init()) {

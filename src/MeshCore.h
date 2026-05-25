@@ -52,6 +52,12 @@ public:
   virtual void onAfterTransmit() { }
   virtual void reboot() = 0;
   virtual void powerOff() { /* no op */ }
+  // Called at the very start of example setup() functions, before any
+  // defensive delays. Boards may override to kick off immediate visual
+  // feedback (e.g., starting a boot-indicator LED sequence) so the user
+  // sees the device is alive without waiting for Serial enumeration delays.
+  // Default no-op: boards that don't care need not implement anything.
+  virtual void onWake() { /* no op */ }
   // Called by example setup() functions to signal that boot is complete.
   // Boards may override to stop a boot-indicator LED sequence or similar.
   // Default no-op: boards that don't care need not implement anything.

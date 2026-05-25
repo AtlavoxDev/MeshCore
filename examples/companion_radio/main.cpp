@@ -113,6 +113,7 @@ void halt() {
 
 void setup() {
   Serial.begin(115200);
+  board.onWake();
 
   board.begin();
 

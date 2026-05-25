@@ -30,6 +30,7 @@ static unsigned long userBtnDownAt = 0;
 
 void setup() {
   Serial.begin(115200);
+  board.onWake();
   delay(1000);
 
   board.begin();
