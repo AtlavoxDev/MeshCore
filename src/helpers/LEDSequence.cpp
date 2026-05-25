@@ -32,14 +32,21 @@ static constexpr uint32_t FLICKER_SAFETY_TICKS = 300;
 static constexpr uint32_t POWEROFF_SOLID_MS      = 1000;
 static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =   50;
 
-// Mid-hold power-button feedback proportions (parts-per-1000 of the hold threshold).
-// Symmetric: 0-10% flash, 10-50% dark, 50-60% flash, 60-100% dark, 100% commit.
-// For a 2000 ms threshold: 0-200, 200-1000, 1000-1200, 1200-2000, commit —
-// equal 800 ms dark gaps on each side of FLASH2 for a clean rhythmic feel.
-static constexpr uint32_t HOLD_FLASH1_START_PPK =    0;
-static constexpr uint32_t HOLD_FLASH1_END_PPK   =  100;
-static constexpr uint32_t HOLD_FLASH2_START_PPK =  500;
-static constexpr uint32_t HOLD_FLASH2_END_PPK   =  600;
+// Mid-hold power-button feedback: beat-based cadence.
+// The hold threshold is divided into 2 measures × 4 beats = 8 beats total,
+// with each flash occupying the first half of its beat (50% duty cycle).
+//
+// Measure 1: single blink on beat 1 (the "I see you started pressing" cue).
+//   Beats 2-4 dark — calm/slow opening rhythm.
+// Measure 2: flash on every beat (4 flashes total).
+//   Escalating "you're about to commit" cue.
+// Measure 3, beat 1: commit (caller invokes powerOff() → SOLID phase).
+//
+// At a 2000 ms threshold: each beat is 250 ms, each flash is 125 ms.
+// At a 1500 ms threshold: each beat is ~187 ms, each flash is ~94 ms.
+// Pattern proportions stay constant regardless of threshold.
+static constexpr uint32_t HOLD_BEATS_PER_THRESHOLD = 8;
+static constexpr uint32_t HOLD_BEATS_PER_MEASURE   = 4;
 
 // ============================================================================
 // Boot-sequence state machine (driven asynchronously where supported,
@@ -370,19 +377,24 @@ bool LEDSequence::pollPowerButton(int8_t pin, uint32_t threshold_ms) {
     return true;
   }
 
-  // Progressive feedback. Compute phase based on parts-per-1000 of threshold.
-  // (Multiply before divide to keep precision with integer math.)
-  uint32_t ppk = (uint32_t)((held * 1000ULL) / threshold_ms);
+  // Beat-based feedback. Split the threshold into 8 beats; first beat of
+  // measure 1 blinks, every beat of measure 2 flashes, measure 3 commits.
+  const uint32_t beat_duration_ms = threshold_ms / HOLD_BEATS_PER_THRESHOLD;
+  const uint32_t half_beat_ms     = beat_duration_ms / 2;
+  const uint32_t measure_2_start  = beat_duration_ms * HOLD_BEATS_PER_MEASURE;  // = threshold/2
 
-  bool in_flash1 = (ppk >= HOLD_FLASH1_START_PPK && ppk < HOLD_FLASH1_END_PPK);
-  bool in_flash2 = (ppk >= HOLD_FLASH2_START_PPK && ppk < HOLD_FLASH2_END_PPK);
-
-  if (in_flash1 || in_flash2) {
-    writePin(s_cfg.primary_pin,   true);
-    writePin(s_cfg.secondary_pin, false);
+  bool led_on;
+  if (held < measure_2_start) {
+    // Measure 1: only beat 1's first half is on (single opening blink).
+    led_on = (held < half_beat_ms);
   } else {
-    setLEDs(false, false);
+    // Measure 2: first half of every beat is on (4 escalating flashes).
+    const uint32_t beat_phase = (held - measure_2_start) % beat_duration_ms;
+    led_on = (beat_phase < half_beat_ms);
   }
+
+  writePin(s_cfg.primary_pin,   led_on);
+  writePin(s_cfg.secondary_pin, false);
 
   return false;
 }

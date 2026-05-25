@@ -81,12 +81,14 @@ public:
   /// override. Returns true once the button has been held continuously for
   /// at least threshold_ms — the board should then call its powerOff().
   ///
-  /// While held: LEDs flash at canonical proportions of the hold
-  ///   (0%-10% : first warning flash,
-  ///    10%-60% : dark,
-  ///    60%-70% : second warning flash,
-  ///    70%-100% : dark,
-  ///    100% : returns true; board calls powerOff()).
+  /// Visual cadence (threshold split into 2 measures × 4 beats = 8 beats):
+  ///   Measure 1, beat 1: single brief blink (the "I see you" cue).
+  ///   Measure 1, beats 2-4: dark.
+  ///   Measure 2, every beat: flash (4 escalating flashes leading to commit).
+  ///   Measure 3, beat 1: caller invokes powerOff() (SOLID phase follows).
+  ///
+  /// At a 2000 ms threshold: each beat is 250 ms, each flash is 125 ms.
+  /// At a 1500 ms threshold: each beat is ~187 ms, each flash is ~94 ms.
   ///
   /// Released before threshold: LEDs go off, internal hold tracker resets,
   /// returns false. Subsequent presses start over.
