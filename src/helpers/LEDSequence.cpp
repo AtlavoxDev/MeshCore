@@ -33,11 +33,13 @@ static constexpr uint32_t POWEROFF_SOLID_MS      = 1000;
 static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =   50;
 
 // Mid-hold power-button feedback proportions (parts-per-1000 of the hold threshold).
-// 0–10% flash, 10–60% dark, 60–70% flash, 70–100% dark, 100% commit.
+// Symmetric: 0-10% flash, 10-50% dark, 50-60% flash, 60-100% dark, 100% commit.
+// For a 2000 ms threshold: 0-200, 200-1000, 1000-1200, 1200-2000, commit —
+// equal 800 ms dark gaps on each side of FLASH2 for a clean rhythmic feel.
 static constexpr uint32_t HOLD_FLASH1_START_PPK =    0;
 static constexpr uint32_t HOLD_FLASH1_END_PPK   =  100;
-static constexpr uint32_t HOLD_FLASH2_START_PPK =  600;
-static constexpr uint32_t HOLD_FLASH2_END_PPK   =  700;
+static constexpr uint32_t HOLD_FLASH2_START_PPK =  500;
+static constexpr uint32_t HOLD_FLASH2_END_PPK   =  600;
 
 // ============================================================================
 // Boot-sequence state machine (driven asynchronously where supported,
