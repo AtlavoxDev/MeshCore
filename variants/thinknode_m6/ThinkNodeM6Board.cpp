@@ -5,9 +5,9 @@
 
 #include <Wire.h>
 #include <helpers/LEDSequence.h>
-#include <helpers/PowerButton.h>
+#include <helpers/HoldButton.h>
 
-// Power-button hold threshold. PowerButton::poll() drives the canonical
+// Power-button hold threshold. HoldButton::poll() drives the canonical
 // mid-hold flash feedback (proportional to this threshold) on PIN_LED_RED
 // and returns true once the button has been held for the full duration.
 #define M6_OFF_COMMIT_MS  2000
@@ -83,12 +83,12 @@ void ThinkNodeM6Board::begin() {
   LEDSequence::begin(led_cfg);
   LEDSequence::playBoot();
 
-  PowerButton::Config btn_cfg;
+  HoldButton::Config btn_cfg;
   btn_cfg.pin           = PIN_USER_BTN;
   btn_cfg.threshold_ms  = M6_OFF_COMMIT_MS;
   btn_cfg.feedback_pin  = PIN_LED_RED;  // mid-hold flashes use the red LED
   btn_cfg.active_level  = HIGH;
-  PowerButton::begin(btn_cfg);
+  HoldButton::begin(btn_cfg);
 
   Wire.begin();
 
@@ -143,9 +143,9 @@ void ThinkNodeM6Board::onBootComplete() {
 }
 
 void ThinkNodeM6Board::pollButton() {
-  // PowerButton handles button polling, hold-time tracking, and the
+  // HoldButton handles button polling, hold-time tracking, and the
   // canonical mid-hold flash feedback. Configured in begin().
-  if (PowerButton::poll()) {
+  if (HoldButton::poll()) {
     Serial.println("Powering off...");
     powerOff();  // does not return
   }

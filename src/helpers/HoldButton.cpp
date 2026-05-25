@@ -1,13 +1,12 @@
-#include "PowerButton.h"
+#include "HoldButton.h"
 
 // Beat structure for the mid-hold cadence. See header for the visual spec.
 static constexpr uint32_t HOLD_BEATS_PER_THRESHOLD = 8;
 static constexpr uint32_t HOLD_BEATS_PER_MEASURE   = 4;
 
-// Configuration + hold-tracking state. Single power button per board; this
-// is intentional — if a board ever needs multiple hold-detect buttons it
-// can hand-roll them, but the framework's canonical pattern is one button.
-static PowerButton::Config s_cfg          = {};
+// Configuration + hold-tracking state. Singleton (one HoldButton per board)
+// — see header notes on the rationale.
+static HoldButton::Config s_cfg          = {};
 static unsigned long       s_hold_down_at = 0;
 
 static inline void writeFeedback(bool on) {
@@ -15,7 +14,7 @@ static inline void writeFeedback(bool on) {
   digitalWrite(s_cfg.feedback_pin, on ? s_cfg.active_level : !s_cfg.active_level);
 }
 
-void PowerButton::begin(const PowerButton::Config& cfg) {
+void HoldButton::begin(const HoldButton::Config& cfg) {
   s_cfg          = cfg;
   s_hold_down_at = 0;
   // Note: button pinMode is the board's responsibility (usually INPUT_PULLUP
@@ -23,7 +22,7 @@ void PowerButton::begin(const PowerButton::Config& cfg) {
   // OUTPUT by whatever owns the LED — we just write to it.
 }
 
-bool PowerButton::poll() {
+bool HoldButton::poll() {
   if (s_cfg.pin < 0) return false;
 
   int btnState = digitalRead(s_cfg.pin);
