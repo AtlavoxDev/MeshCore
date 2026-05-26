@@ -177,9 +177,10 @@ void LEDSequence::onBootComplete() {
     // BRIGHT still running — flag it; BRIGHT-end ISR runs the flash directly
     s_flash_requested = true;
   } else if (s_boot_state == BOOT_LED_WAIT_FOR_BOOT) {
-    // BRIGHT done; trigger FLASH now
+    // BRIGHT done and timer was stopped; restart it before arming for FLASH.
     writePin(flashPin(), true);
     s_boot_state = BOOT_LED_FLASH;
+    start_timer();
     arm_timer_us(BOOT_FLASH_US);
   }
   // else IDLE / FLASH: already done or in progress
