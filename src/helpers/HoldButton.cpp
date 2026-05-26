@@ -6,12 +6,19 @@ static constexpr uint32_t HOLD_BEATS_PER_MEASURE   = 4;
 
 // MomentaryButton is heap-allocated so Config's pin/threshold can be set at
 // runtime rather than fixed at static-init time. One alloc per boot.
-static HoldButton::Config s_cfg = {};
-static MomentaryButton*   s_btn = nullptr;
+static HoldButton::Config s_cfg          = {};
+static MomentaryButton*   s_btn          = nullptr;
+static bool               s_feedback_on  = false;  // tracks what WE last wrote
 
+// Only writes the pin if the desired state differs from our last write. Avoids
+// stomping on other code that shares the feedback pin (e.g., LEDSequence's
+// boot animation, which uses the same pin as the primary LED on M6).
 static inline void writeFeedback(bool on) {
-  if (s_cfg.feedback_pin < 0) return;
-  digitalWrite(s_cfg.feedback_pin, on ? s_cfg.active_level : !s_cfg.active_level);
+  if (on == s_feedback_on) return;
+  if (s_cfg.feedback_pin >= 0) {
+    digitalWrite(s_cfg.feedback_pin, on ? s_cfg.active_level : !s_cfg.active_level);
+  }
+  s_feedback_on = on;
 }
 
 void HoldButton::begin(const HoldButton::Config& cfg) {
