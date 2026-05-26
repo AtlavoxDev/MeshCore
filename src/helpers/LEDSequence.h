@@ -3,11 +3,9 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// Canonical boot / power-off LED choreography. Opt-in shared helper.
-// Boot: both LEDs on for 1s, then off; secondary LED briefly flashes when
-// onBootComplete() is called. NRF52/ESP32 run the 1s BRIGHT phase via a
-// hardware timer so it doesn't block setup(); other platforms degrade to
-// a synchronous cue at boot end.
+// Canonical boot / power-off LED cues. Opt-in shared helper.
+// Boot: both LEDs on for the duration of setup(); short closing flash
+// on the secondary LED when onBootComplete() is called.
 //
 // Gotcha: never analogWrite() on a pin handed to this helper (PWM-poisons
 // it on the Adafruit nRF52 core).
@@ -22,15 +20,15 @@ public:
 
   static void begin(const Config& cfg);
 
-  // Both LEDs on for 1s, then off. Returns immediately (async on NRF52/ESP32).
+  // Turn both LEDs on. Returns immediately. LEDs stay on through the rest
+  // of setup() until onBootComplete() turns them off and runs the flash.
   static void playBoot();
 
-  // Triggers the closing flash (secondary LED on for ~100ms). If BRIGHT is
-  // still running, the flash is queued and runs immediately after BRIGHT ends.
+  // LEDs off, brief gap, secondary LED flash, off. Synchronous (~300ms).
   static void onBootComplete();
 
-  // Hard-stop the boot sequence — use before code that needs exclusive
-  // control of the LED pins (e.g., powerOff()'s shutdown cue).
+  // Turn LEDs off. Used before code that needs exclusive control of the
+  // LED pins (e.g., powerOff()'s shutdown cue).
   static void cancel();
 
   // Power-off cue (synchronous, ~1.05s): primary solid 1s → both flash 50ms → off.
