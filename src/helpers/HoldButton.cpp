@@ -10,9 +10,9 @@ static HoldButton::Config s_cfg          = {};
 static MomentaryButton*   s_btn          = nullptr;
 static bool               s_feedback_on  = false;  // tracks what WE last wrote
 
-// Only writes the pin if the desired state differs from our last write. Avoids
-// stomping on other code that shares the feedback pin (e.g., LEDSequence's
-// boot animation, which uses the same pin as the primary LED on M6).
+// Only writes the pin if the desired state differs from our last write.
+// Prevents stomping on other code that shares the feedback pin (e.g.,
+// LEDSequence's BRIGHT phase, which uses the same pin as primary LED).
 static inline void writeFeedback(bool on) {
   if (on == s_feedback_on) return;
   if (s_cfg.feedback_pin >= 0) {

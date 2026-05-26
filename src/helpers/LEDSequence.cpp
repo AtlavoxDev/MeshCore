@@ -8,45 +8,23 @@
   #include <esp_timer.h>
 #endif
 
-// Timing constants (microseconds for hardware-timer platforms).
-static constexpr uint32_t BOOT_BRIGHT_US       = 1000000;  // 1.0s both LEDs on
-static constexpr uint32_t BOOT_DARK1_US        = 1000000;  // 1.0s gap before flicker
-static constexpr uint32_t BOOT_DARK2_US        = 1000000;  // 1.0s gap before final flash
-static constexpr uint32_t BOOT_FLASH_US        =  100000;  // 100ms closing flash
-static constexpr uint32_t FLICKER_MIN_US       =   10000;  // 10ms min interval
-static constexpr uint32_t FLICKER_RANGE_US     =   90000;  // +0-90ms jitter
-static constexpr uint32_t FLICKER_MIN_TICKS    =      10;  // always flicker ≥ ~550ms even on fast boot
-static constexpr uint32_t FLICKER_SAFETY_TICKS =     300;  // ~16s fallback cap
-static constexpr uint32_t POWEROFF_SOLID_MS    =    1000;
-static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =    50;
+static constexpr uint32_t BOOT_BRIGHT_US         = 1000000;  // 1.0s both LEDs on
+static constexpr uint32_t BOOT_FLASH_US          =  100000;  // 100ms closing flash
+static constexpr uint32_t POWEROFF_SOLID_MS      =    1000;
+static constexpr uint32_t POWEROFF_DUAL_FLASH_MS =      50;
 
 enum BootLedState : uint8_t {
   BOOT_LED_IDLE = 0,
-  BOOT_LED_BRIGHT,
-  BOOT_LED_DARK1,
-  BOOT_LED_FLICKER,
-  BOOT_LED_DARK2,
-  BOOT_LED_FLASH,
+  BOOT_LED_BRIGHT,         // both LEDs on, BRIGHT timer running
+  BOOT_LED_WAIT_FOR_BOOT,  // BRIGHT done, waiting for onBootComplete()
+  BOOT_LED_FLASH,          // closing flash, FLASH timer running
 };
 
 // volatile: mutated from ISR/timer callback on async platforms
-static LEDSequence::Config   s_cfg             = {};
-static bool                  s_enabled         = false;
-static volatile BootLedState s_boot_state      = BOOT_LED_IDLE;
-static volatile bool         s_flicker_exit    = false;
-static volatile bool         s_flicker_blue_on = false;
-static volatile uint32_t     s_flicker_ticks   = 0;
-
-// xorshift32 PRNG — ISR-safe (no malloc, no globals beyond s_rng).
-static uint32_t s_rng = 0xC0FFEE42;
-static inline uint32_t next_random() {
-  uint32_t x = s_rng;
-  x ^= x << 13;
-  x ^= x >> 17;
-  x ^= x << 5;
-  s_rng = x;
-  return x;
-}
+static LEDSequence::Config   s_cfg              = {};
+static bool                  s_enabled          = false;
+static volatile BootLedState s_boot_state       = BOOT_LED_IDLE;
+static volatile bool         s_flash_requested  = false;  // onBootComplete fired during BRIGHT
 
 static inline void writePin(int8_t pin, bool on) {
   if (pin < 0) return;
@@ -58,8 +36,12 @@ static inline void setLEDs(bool primary_on, bool secondary_on) {
   writePin(s_cfg.secondary_pin, secondary_on);
 }
 
+static inline int8_t flashPin() {
+  return (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin : s_cfg.primary_pin;
+}
+
 #if defined(NRF52_PLATFORM)
-// NRF52: use TIMER2 hardware peripheral with ISR
+// NRF52: TIMER2 hardware peripheral with ISR
 static void arm_timer_us(uint32_t microseconds) {
   NRF_TIMER2->CC[0] = microseconds;
   NRF_TIMER2->TASKS_CLEAR = 1;
@@ -81,7 +63,7 @@ static void stop_timer() {
   NVIC_DisableIRQ(TIMER2_IRQn);
 }
 #elif defined(ESP32)
-// ESP32: use esp_timer (FreeRTOS-task-backed; no ISR restrictions)
+// ESP32: esp_timer (FreeRTOS-task-backed; no ISR restrictions)
 static esp_timer_handle_t s_esp_timer = nullptr;
 static void esp_timer_callback(void* arg);
 static void arm_timer_us(uint32_t microseconds) {
@@ -113,46 +95,17 @@ static void advance_boot_state() {
   switch (s_boot_state) {
     case BOOT_LED_BRIGHT:
       setLEDs(false, false);
-      s_boot_state = BOOT_LED_DARK1;
-      arm_timer_us(BOOT_DARK1_US);
-      break;
-
-    case BOOT_LED_DARK1:
-      writePin(s_cfg.primary_pin, true);  // primary solid for flicker phase
-      s_flicker_blue_on = false;
-      s_flicker_ticks   = 0;
-      s_boot_state      = BOOT_LED_FLICKER;
-      arm_timer_us(FLICKER_MIN_US + (next_random() % FLICKER_RANGE_US));
-      break;
-
-    case BOOT_LED_FLICKER:
-      // Check exit BEFORE toggling so onBootComplete() shortcuts cleanly.
-      // Require a minimum tick count so fast-boot devices (whose setup()
-      // finishes before BRIGHT+DARK1 elapse) still get a visible flicker
-      // instead of immediately bailing on the first tick.
-      s_flicker_ticks++;
-      if ((s_flicker_exit && s_flicker_ticks >= FLICKER_MIN_TICKS) ||
-           s_flicker_ticks > FLICKER_SAFETY_TICKS) {
-        setLEDs(false, false);
-        s_boot_state = BOOT_LED_DARK2;
-        arm_timer_us(BOOT_DARK2_US);
+      if (s_flash_requested) {
+        // onBootComplete fired during BRIGHT — go straight to FLASH
+        writePin(flashPin(), true);
+        s_boot_state = BOOT_LED_FLASH;
+        arm_timer_us(BOOT_FLASH_US);
       } else {
-        s_flicker_blue_on = !s_flicker_blue_on;
-        int8_t flick_pin = (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin
-                                                       : s_cfg.primary_pin;
-        writePin(flick_pin, s_flicker_blue_on);
-        arm_timer_us(FLICKER_MIN_US + (next_random() % FLICKER_RANGE_US));
+        // BRIGHT ended but boot still running; wait for onBootComplete()
+        s_boot_state = BOOT_LED_WAIT_FOR_BOOT;
+        stop_timer();
       }
       break;
-
-    case BOOT_LED_DARK2: {
-      int8_t flash_pin = (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin
-                                                     : s_cfg.primary_pin;
-      writePin(flash_pin, true);
-      s_boot_state = BOOT_LED_FLASH;
-      arm_timer_us(BOOT_FLASH_US);
-      break;
-    }
 
     case BOOT_LED_FLASH:
       setLEDs(false, false);
@@ -161,8 +114,9 @@ static void advance_boot_state() {
       break;
 
     case BOOT_LED_IDLE:
+    case BOOT_LED_WAIT_FOR_BOOT:
     default:
-      stop_timer();  // safety net
+      stop_timer();  // safety
       break;
   }
 }
@@ -194,22 +148,22 @@ void LEDSequence::begin(const LEDSequence::Config& cfg) {
   }
   // TODO: buzzer pin init when buzzer integration lands
 
-  s_boot_state   = BOOT_LED_IDLE;
-  s_flicker_exit = false;
+  s_boot_state      = BOOT_LED_IDLE;
+  s_flash_requested = false;
 }
 
 void LEDSequence::playBoot() {
   if (!s_enabled) return;
 
 #if defined(NRF52_PLATFORM) || defined(ESP32)
-  s_flicker_exit  = false;
-  s_flicker_ticks = 0;
+  s_flash_requested = false;
   setLEDs(true, true);
   s_boot_state = BOOT_LED_BRIGHT;
   start_timer();
   arm_timer_us(BOOT_BRIGHT_US);
 #else
-  // No hardware timer: LEDs stay on until onBootComplete().
+  // No hardware timer: LEDs stay on until onBootComplete() runs the
+  // synchronous flash sequence.
   setLEDs(true, true);
   s_boot_state = BOOT_LED_BRIGHT;
 #endif
@@ -219,15 +173,21 @@ void LEDSequence::onBootComplete() {
   if (!s_enabled) return;
 
 #if defined(NRF52_PLATFORM) || defined(ESP32)
-  s_flicker_exit = true;  // ISR sees this on next tick and runs DARK2 + FLASH
+  if (s_boot_state == BOOT_LED_BRIGHT) {
+    // BRIGHT still running — flag it; BRIGHT-end ISR runs the flash directly
+    s_flash_requested = true;
+  } else if (s_boot_state == BOOT_LED_WAIT_FOR_BOOT) {
+    // BRIGHT done; trigger FLASH now
+    writePin(flashPin(), true);
+    s_boot_state = BOOT_LED_FLASH;
+    arm_timer_us(BOOT_FLASH_US);
+  }
+  // else IDLE / FLASH: already done or in progress
 #else
-  // Sync fallback: final flash, then off.
+  // Fallback: synchronous close
   if (s_boot_state == BOOT_LED_IDLE) return;
   setLEDs(false, false);
-  delay(BOOT_DARK2_US / 1000);
-  int8_t flash_pin = (s_cfg.secondary_pin >= 0) ? s_cfg.secondary_pin
-                                                 : s_cfg.primary_pin;
-  writePin(flash_pin, true);
+  writePin(flashPin(), true);
   delay(BOOT_FLASH_US / 1000);
   setLEDs(false, false);
   s_boot_state = BOOT_LED_IDLE;
@@ -238,14 +198,13 @@ void LEDSequence::cancel() {
   if (!s_enabled) return;
   stop_timer();
   setLEDs(false, false);
-  s_boot_state    = BOOT_LED_IDLE;
-  s_flicker_exit  = false;
-  s_flicker_ticks = 0;
+  s_boot_state      = BOOT_LED_IDLE;
+  s_flash_requested = false;
 }
 
 void LEDSequence::playPowerOff() {
   if (!s_enabled) return;
-  cancel();  // stop any running boot sequence before we take over the pins
+  cancel();  // stop boot sequence before taking over the pins
 
   // SOLID: primary on, secondary off, 1s
   writePin(s_cfg.primary_pin,   true);
