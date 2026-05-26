@@ -16,10 +16,11 @@
 class HoldButton {
 public:
   struct Config {
-    int8_t   pin           = -1;     // button GPIO; -1 disables poll()
-    uint32_t threshold_ms  = 2000;
-    int8_t   feedback_pin  = -1;     // -1 = no visual feedback
-    uint8_t  active_level  = HIGH;
+    int8_t   pin                   = -1;     // button GPIO; -1 disables poll()
+    uint32_t threshold_ms          = 2000;
+    int8_t   feedback_pin          = -1;     // -1 = no visual feedback
+    uint8_t  active_level          = HIGH;
+    uint8_t  feedback_brightness_pct = 100;  // 0-100; <100 forces analogWrite (PWM)
   };
 
   static void begin(const Config& cfg);

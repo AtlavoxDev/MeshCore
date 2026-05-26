@@ -68,19 +68,22 @@ void SenseCapSolarBoard::begin() {
 #endif
 
   LEDSequence::Config led_cfg;
-  led_cfg.primary_pin   = LED_WHITE;   // solid during FLICKER + hold feedback
-  led_cfg.secondary_pin = LED_BLUE;    // toggling in FLICKER + final FLASH
-  led_cfg.buzzer_pin    = -1;          // no buzzer wired through helper
-  led_cfg.active_level  = HIGH;
+  led_cfg.primary_pin              = LED_WHITE;
+  led_cfg.secondary_pin            = LED_BLUE;
+  led_cfg.buzzer_pin               = -1;
+  led_cfg.active_level             = HIGH;
+  led_cfg.primary_brightness_pct   = 60;   // white LED is uncomfortably bright at 100%
+  led_cfg.secondary_brightness_pct = 100;  // blue is also TX LED; must stay digitalWrite-compatible
   LEDSequence::begin(led_cfg);
   LEDSequence::playBoot();
 
 #ifdef PIN_PWR_BTN
   HoldButton::Config btn_cfg;
-  btn_cfg.pin           = PIN_PWR_BTN;
-  btn_cfg.threshold_ms  = SS_OFF_COMMIT_MS;
-  btn_cfg.feedback_pin  = LED_WHITE;
-  btn_cfg.active_level  = HIGH;
+  btn_cfg.pin                     = PIN_PWR_BTN;
+  btn_cfg.threshold_ms            = SS_OFF_COMMIT_MS;
+  btn_cfg.feedback_pin            = LED_WHITE;
+  btn_cfg.active_level            = HIGH;
+  btn_cfg.feedback_brightness_pct = 60;   // match LEDSequence's white setting (shared pin)
   HoldButton::begin(btn_cfg);
 #endif
 

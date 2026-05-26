@@ -13,10 +13,23 @@ static bool               s_feedback_on  = false;  // tracks what WE last wrote
 // Only writes the pin if the desired state differs from our last write.
 // Prevents stomping on other code that shares the feedback pin (e.g.,
 // LEDSequence's BRIGHT phase, which uses the same pin as primary LED).
+//
+// Uses digitalWrite at 100% brightness, analogWrite (PWM) below. If the
+// feedback pin is also driven by LEDSequence, the two helpers must use
+// matching brightness_pct values to keep the pin in a consistent mode —
+// see LEDSequence.h for the nRF52 PWM-poisoning rule.
 static inline void writeFeedback(bool on) {
   if (on == s_feedback_on) return;
   if (s_cfg.feedback_pin >= 0) {
-    digitalWrite(s_cfg.feedback_pin, on ? s_cfg.active_level : !s_cfg.active_level);
+    if (s_cfg.feedback_brightness_pct >= 100) {
+      digitalWrite(s_cfg.feedback_pin, on ? s_cfg.active_level : !s_cfg.active_level);
+    } else {
+      uint8_t pwm = on
+        ? (uint8_t)((uint16_t)s_cfg.feedback_brightness_pct * 255U / 100U)
+        : 0;
+      if (s_cfg.active_level == LOW) pwm = 255 - pwm;
+      analogWrite(s_cfg.feedback_pin, pwm);
+    }
   }
   s_feedback_on = on;
 }
