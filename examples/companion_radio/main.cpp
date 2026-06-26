@@ -91,6 +91,10 @@ static uint32_t _atoi(const char* sp) {
   UITask ui_task(&board, &serial_interface);
 #endif
 
+#ifdef BLE_PIN_CODE
+  #include <helpers/BLEPairingIndicator.h>
+#endif
+
 StdRNG fast_rng;
 SimpleMeshTables tables;
 MyMesh the_mesh(radio_driver, fast_rng, rtc_clock, tables, store
@@ -244,6 +248,11 @@ void setup() {
 
 void loop() {
   board.pollButton();
+
+#ifdef BLE_PIN_CODE
+  // Alternating red/blue LEDs while discoverable (no client paired).
+  BLEPairingIndicator::poll(!serial_interface.isConnected());
+#endif
 
   the_mesh.loop();
   sensors.loop();
