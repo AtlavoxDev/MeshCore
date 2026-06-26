@@ -6,6 +6,9 @@
 #include <Wire.h>
 #include <helpers/LEDSequence.h>
 #include <helpers/HoldButton.h>
+#ifdef BLE_PIN_CODE
+  #include <helpers/BLEPairingIndicator.h>
+#endif
 
 #define M6_OFF_COMMIT_MS  2000  // hold-to-power-off threshold
 
@@ -69,6 +72,14 @@ void ThinkNodeM6Board::begin() {
   btn_cfg.feedback_pin  = PIN_LED_RED;
   btn_cfg.active_level  = HIGH;
   HoldButton::begin(btn_cfg);
+
+#ifdef BLE_PIN_CODE
+  BLEPairingIndicator::Config pair_cfg;
+  pair_cfg.primary_pin   = PIN_LED_RED;
+  pair_cfg.secondary_pin = PIN_LED_BLUE;
+  pair_cfg.active_level  = HIGH;
+  BLEPairingIndicator::begin(pair_cfg);
+#endif
 
   Wire.begin();
   delay(10);  // sx1262 power-up settle
