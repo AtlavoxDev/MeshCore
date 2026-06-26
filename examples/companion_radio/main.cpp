@@ -143,6 +143,18 @@ void setup() {
     if (!QSPIFlash.begin()) {
       // debug output might not be available at this point, might be too early. maybe should fall back to InternalFS here?
       MESH_DEBUG_PRINTLN("CustomLFS_QSPIFlash: failed to initialize");
+#if defined(NRF52_PLATFORM)
+      // A failed QSPI init (e.g. nrfx_qspi_init() returning NRFX_ERROR_TIMEOUT)
+      // leaves the QSPI peripheral enabled and QSPI_IRQn enabled in the NVIC
+      // (at priority 0, which is reserved for the SoftDevice) and does NOT clean
+      // up after itself. That poisons the subsequent SoftDevice enable
+      // (Bluefruit.begin()), so on BLE builds the node never advertises (#2827).
+      // Tear the peripheral down so the SoftDevice can start cleanly.
+      NVIC_DisableIRQ(QSPI_IRQn);
+      NVIC_ClearPendingIRQ(QSPI_IRQn);
+      NRF_QSPI->TASKS_DEACTIVATE = 1;
+      NRF_QSPI->ENABLE = 0;
+#endif
     } else {
       MESH_DEBUG_PRINTLN("CustomLFS_QSPIFlash: initialized successfully");
     }
